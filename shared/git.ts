@@ -1,0 +1,94 @@
+// The contract between the panel and the daemon half, which runs git.
+
+import { defineRpc } from "@getpaseo/plugin";
+import { z } from "zod";
+
+const hash = z.string().regex(/^[0-9a-f]{40,64}$/);
+const nothing = z.object({});
+
+export const fileSchema = z.object({
+  path: z.string(),
+  from: z.string().optional(), // a rename's old path
+  status: z.string(), // one letter: M A D R C T, U for a conflict, ? for untracked
+});
+export type FileChange = z.infer<typeof fileSchema>;
+
+export const refSchema = z.object({
+  kind: z.enum(["head", "branch", "remote", "tag"]), // head: the checked-out branch, or a detached HEAD
+  name: z.string(),
+});
+export type Ref = z.infer<typeof refSchema>;
+
+export const commitSchema = z.object({
+  hash,
+  parents: z.array(hash),
+  author: z.string(),
+  time: z.number(), // author time, seconds since the epoch
+  subject: z.string(),
+  refs: z.array(refSchema),
+});
+export type Commit = z.infer<typeof commitSchema>;
+
+export const statusRpc = defineRpc({
+  name: "git.status",
+  input: z.object({ cwd: z.string() }),
+  output: z.object({
+    branch: z.string().nullable(), // null when HEAD is detached
+    head: hash.nullable(), // null before the first commit
+    upstream: z.string().nullable(),
+    ahead: z.number(),
+    behind: z.number(),
+    conflicts: z.array(fileSchema),
+    staged: z.array(fileSchema),
+    changes: z.array(fileSchema), // unstaged and untracked
+    refs: z.string(), // changes whenever any ref moves: the history is stale
+  }),
+});
+export type Status = z.infer<typeof statusRpc.output>;
+
+export const scopeSchema = z.enum(["current", "all"]); // current: the checked-out branch and its upstream
+export type Scope = z.infer<typeof scopeSchema>;
+
+export const logRpc = defineRpc({
+  name: "git.log",
+  input: z.object({ cwd: z.string(), scope: scopeSchema, limit: z.number().int().positive() }),
+  output: z.object({ commits: z.array(commitSchema), more: z.boolean() }),
+});
+
+export const showRpc = defineRpc({
+  name: "git.show",
+  input: z.object({ cwd: z.string(), hash }),
+  output: z.object({ message: z.string(), files: z.array(fileSchema) }),
+});
+
+export const diffSourceSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("commit"), hash }),
+  z.object({ kind: z.literal("staged") }),
+  z.object({ kind: z.literal("changes") }),
+]);
+export type DiffSource = z.infer<typeof diffSourceSchema>;
+
+export const diffRpc = defineRpc({
+  name: "git.diff",
+  input: z.object({ cwd: z.string(), source: diffSourceSchema, file: fileSchema }),
+  output: z.object({ diff: z.string() }),
+});
+
+const files = z.object({ cwd: z.string(), files: z.array(fileSchema).min(1) });
+
+export const stageRpc = defineRpc({ name: "git.stage", input: files, output: nothing });
+export const unstageRpc = defineRpc({ name: "git.unstage", input: files, output: nothing });
+/** Throws away unstaged edits, and deletes untracked files. */
+export const discardRpc = defineRpc({ name: "git.discard", input: files, output: nothing });
+
+export const commitRpc = defineRpc({
+  name: "git.commit",
+  input: z.object({ cwd: z.string(), message: z.string().min(1) }),
+  output: nothing,
+});
+
+export const syncRpc = defineRpc({
+  name: "git.sync",
+  input: z.object({ cwd: z.string(), action: z.enum(["fetch", "pull", "push"]) }),
+  output: nothing,
+});

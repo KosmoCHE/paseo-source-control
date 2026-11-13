@@ -1,0 +1,44 @@
+// Stands in for @getpaseo/plugin/client/ui in the browser preview. Rough on purpose:
+// these are the host's pieces, and only their place in the layout matters here.
+
+import { icons } from "lucide-react";
+import type { ReactNode } from "react";
+import { Text, View } from "react-native";
+
+export function Icon({ name, size = 24, color }: { name: string; size?: number; color?: string }) {
+  const Glyph = icons[name as keyof typeof icons];
+  if (!Glyph) throw new Error(`Unknown Lucide icon: ${name}`); // the real host draws nothing; here a typo should be loud
+  return <Glyph size={size} color={color} />;
+}
+
+export function Loading() {
+  return <Text style={{ padding: 12, color: "gray" }}>Loading…</Text>;
+}
+
+function say(message: string) {
+  const toast = Object.assign(document.createElement("div"), { textContent: message });
+  toast.setAttribute("style", "position:fixed;bottom:16px;left:16px;padding:8px 12px;border-radius:6px;background:#333;color:#fff;font:13px system-ui;white-space:pre-wrap");
+  document.body.append(toast);
+  setTimeout(() => toast.remove(), 3200);
+}
+
+export function useToast() {
+  return { show: say, error: say };
+}
+
+export const copyText = (text: string) => navigator.clipboard.writeText(text);
+
+export function Modal({ title, open, children }: { title: string; open: boolean; onOpenChange: (open: boolean) => void; children: ReactNode }) {
+  if (!open) return null;
+  return (
+    <View style={{ position: "fixed" as "absolute", inset: 0, zIndex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#0008" }}>
+      <View style={{ width: 360, borderRadius: 8, backgroundColor: "#26262b" }}>
+        <Text style={{ padding: 16, fontWeight: "600", color: "#fff" }}>{title}</Text>
+        {children}
+      </View>
+    </View>
+  );
+}
+Modal.Content = function Content({ children }: { children: ReactNode }) {
+  return <View style={{ padding: 24, gap: 16 }}>{children}</View>;
+};
