@@ -166,7 +166,7 @@ function Details({ cwd, workspaceId, commit, rail }: Pick<ItemProps, "cwd" | "wo
   const paint = usePaint();
   const toast = useToast();
   const read = useRpc(showRpc);
-  const detail = useQuery({ queryKey: key(cwd, "show", commit.hash), queryFn: () => read({ cwd, hash: commit.hash }), staleTime: Infinity });
+  const detail = useQuery({ queryKey: key("show", cwd, commit.hash), queryFn: () => read({ cwd, hash: commit.hash }), staleTime: Infinity });
   const copy = () =>
     copyText(commit.hash).then(
       () => toast.show("Commit hash copied", { variant: "success" }),
@@ -243,7 +243,7 @@ export function GraphHeader({ cwd, scope, onScope }: { cwd: string; scope: Scope
       <IconButton name="CloudDownload" label="Fetch" disabled={sync.isPending} onPress={() => run("fetch", "Fetched")} />
       <IconButton name="ArrowDownToLine" label="Pull" disabled={sync.isPending} onPress={() => run("pull", "Pulled")} />
       <IconButton name="ArrowUpFromLine" label="Push" disabled={sync.isPending} onPress={() => run("push", "Pushed")} />
-      <IconButton name="RefreshCw" label="Refresh" onPress={() => void queries.invalidateQueries({ queryKey: key(cwd) })} />
+      <IconButton name="RefreshCw" label="Refresh" onPress={() => void queries.invalidateQueries({ queryKey: key() })} />
     </View>
   );
 }

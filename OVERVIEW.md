@@ -1,10 +1,10 @@
 Git Graph adds a Source Control panel to every workspace, modelled on the one in VS Code: the working tree on top, the commit graph below.
 
-In the working tree part you write a commit message, stage and unstage files, discard changes, and commit what is staged. Files in conflict are listed apart, and staging one marks it resolved.
+In the working tree part you write a commit message, stage and unstage files, discard changes, and commit what is staged or amend the last commit with it. Files in conflict are listed apart, and staging one marks it resolved.
 
-The graph draws one row per commit with its branch lanes, merges, branch names, remote branches and tags. It shows the checked-out branch and its upstream, or all branches. Selecting a commit shows its message and the files it changed. Fetch, pull and push sit in the graph's title bar.
+The graph draws one row per commit with its branch lanes, merges, branch names, remote branches and tags. It shows all branches, or only the checked-out branch and its upstream. Selecting a commit shows its message and the files it changed. Fetch, pull and push sit in the graph's title bar.
 
-Selecting a file anywhere in the panel opens its diff in a workspace tab.
+Selecting a file anywhere in the panel opens its diff in a workspace tab. The two parts of the panel scroll separately.
 
 The panel reads the repository again every three seconds, so commits made by agents appear on their own.
 

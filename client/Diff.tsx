@@ -31,7 +31,7 @@ function Diff({ request: { cwd, source, file } }: { request: DiffRequest }) {
   const read = useRpc(diffRpc);
   const fixed = source.kind === "commit"; // a commit never changes; the working tree keeps changing
   const patch = useQuery({
-    queryKey: key(cwd, "diff", source, file),
+    queryKey: key("diff", cwd, source, file),
     queryFn: () => read({ cwd, source, file }),
     staleTime: fixed ? Infinity : 0,
     refetchInterval: fixed ? false : 3000,

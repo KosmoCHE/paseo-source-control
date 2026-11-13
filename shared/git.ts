@@ -1,4 +1,7 @@
 // The contract between the panel and the daemon half, which runs git.
+//
+// `git.status` takes any directory inside a repository and reports the repository's root.
+// Git names files relative to that root, so every other call takes the root as its `cwd`.
 
 import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
@@ -33,6 +36,7 @@ export const statusRpc = defineRpc({
   name: "git.status",
   input: z.object({ cwd: z.string() }),
   output: z.object({
+    root: z.string(), // the repository's top directory; the paths below are relative to it
     branch: z.string().nullable(), // null when HEAD is detached
     head: hash.nullable(), // null before the first commit
     upstream: z.string().nullable(),
@@ -83,7 +87,10 @@ export const discardRpc = defineRpc({ name: "git.discard", input: files, output:
 
 export const commitRpc = defineRpc({
   name: "git.commit",
-  input: z.object({ cwd: z.string(), message: z.string().min(1) }),
+  // Amending folds what is staged into the last commit; without a message it keeps that commit's own.
+  input: z
+    .object({ cwd: z.string(), message: z.string(), amend: z.boolean() })
+    .refine((input) => input.amend || input.message.trim() !== "", "A commit needs a message"),
   output: nothing,
 });
 

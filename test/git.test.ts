@@ -2,7 +2,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
@@ -49,7 +49,7 @@ test("the first commit: untracked, staged, unstaged again, committed", async (t)
   assert.deepEqual(now.changes, [{ path: "read me.txt", status: "?" }]);
 
   await stage({ cwd, files: now.changes });
-  await commit({ cwd, message: "first" });
+  await commit({ cwd, message: "first", amend: false });
   now = await status({ cwd });
   assert.match(now.head!, /^[0-9a-f]{40}$/);
   assert.deepEqual([now.staged, now.changes, now.conflicts], [[], [], []]);
@@ -168,8 +168,51 @@ test("history carries parents and refs, and a merge shows what it brought in", a
   assert.notEqual((await status({ cwd })).refs, before);
 });
 
+test("a workspace inside the repository: files are named from the root", async (t) => {
+  const { cwd, git, write } = repository(t);
+  mkdirSync(join(cwd, "app"));
+  mkdirSync(join(cwd, "docs"));
+  write("docs/a.md", "one\n");
+  git("add", ".");
+  git("commit", "--quiet", "--message=first");
+  write("docs/a.md", "one\ntwo\n");
+  write("docs/new.md", "new\n");
+
+  const now = await status({ cwd: join(cwd, "app") });
+  assert.equal(now.root, realpathSync(cwd));
+  assert.deepEqual(now.changes, [
+    { path: "docs/a.md", status: "M" },
+    { path: "docs/new.md", status: "?" },
+  ]);
+  assert.match((await diff({ cwd: now.root, source: { kind: "changes" }, file: now.changes[0] })).diff, /^\+two$/m);
+  assert.match((await diff({ cwd: now.root, source: { kind: "changes" }, file: now.changes[1] })).diff, /^\+new$/m);
+  await stage({ cwd: now.root, files: now.changes });
+  assert.equal((await status({ cwd: join(cwd, "app") })).staged.length, 2);
+});
+
+test("an untracked file that has gone is an error, not an empty diff", async (t) => {
+  const { cwd } = repository(t);
+  await assert.rejects(diff({ cwd, source: { kind: "changes" }, file: { path: "gone.txt", status: "?" } }), /Could not access/);
+});
+
+test("amending folds what is staged into the last commit, and rewords it when there is a message", async (t) => {
+  const { cwd, git, write } = repository(t);
+  write("a.txt", "one\n");
+  git("add", ".");
+  git("commit", "--quiet", "--message=first");
+  write("b.txt", "two\n");
+  await stage({ cwd, files: [{ path: "b.txt", status: "?" }] });
+
+  await commit({ cwd, message: "", amend: true });
+  assert.equal(git("log", "--format=%s"), "first");
+  assert.equal(git("show", "--format=", "--name-only"), "a.txt\nb.txt");
+
+  await commit({ cwd, message: "first, reworded", amend: true });
+  assert.equal(git("log", "--format=%s"), "first, reworded");
+});
+
 test("git's own message comes back when it refuses", async (t) => {
   const { cwd } = repository(t);
-  await assert.rejects(commit({ cwd, message: "nothing staged" }), /nothing to commit|no changes added|Initial commit/i);
+  await assert.rejects(commit({ cwd, message: "nothing staged", amend: false }), /nothing to commit|no changes added|Initial commit/i);
   await assert.rejects(status({ cwd: tmpdir() }), /not a git repository/);
 });

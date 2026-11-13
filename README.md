@@ -1,12 +1,12 @@
 # Git Graph for Paseo
 
-A [Paseo](https://paseo.sh) plugin that adds a Source Control panel to every workspace, modelled on the one in VS Code: the working tree on top, the commit graph below.
+A [Paseo](https://paseo.sh) plugin that adds a Source Control panel to every workspace, modelled on the one in VS Code: the working tree on top, the commit graph below, each scrolling on its own.
 
-- **Changes**: commit message and Commit button, staged files, changed files, files in conflict. Stage, unstage and discard per file; stage or unstage everything from the group's title.
-- **Graph**: one row per commit with its lanes, merges, branch names, remote branches and tags. The scope switch shows the checked-out branch with its upstream (`Auto`) or all branches (`All`). Selecting a commit shows its message and changed files. Fetch, pull and push sit in the title bar.
+- **Changes**: commit message, Commit and Amend buttons, staged files, changed files, files in conflict. Stage, unstage and discard per file; stage or unstage everything from the group's title. Amend folds what is staged into the last commit, and rewords it when a message is written.
+- **Graph**: one row per commit with its lanes, merges, branch names, remote branches and tags. The scope switch shows all branches (`All`, the default) or the checked-out branch with its upstream (`Auto`). Selecting a commit shows its message and changed files. Fetch, pull and push sit in the title bar.
 - **Diff**: selecting a file opens its diff in a workspace tab.
 
-The panel reads the repository again every three seconds, so commits made by agents show up without a refresh.
+The panel reads the repository again every three seconds, so commits made by agents show up without a refresh. A workspace whose directory lies inside a larger repository shows that repository.
 
 ## Requirements
 
@@ -16,7 +16,7 @@ The panel reads the repository again every three seconds, so commits made by age
 ## Install from a checkout
 
 ```bash
-git clone <this repository> paseo-plugin-git-graph
+git clone https://github.com/KosmoCHE/paseo-plugin-git-graph.git
 cd paseo-plugin-git-graph
 npm install
 paseo plugin install "$(pwd)"
@@ -59,4 +59,4 @@ The preview renders the real panel under React Native Web with stand-ins for the
 - The graph draws at most ten lanes side by side; lanes further right are cut off.
 - Diffs are plain text, without syntax colours or line numbers.
 - Fetch, pull and push run with the daemon's git credentials and cannot answer a password prompt.
-- Checking out, creating branches and other history edits are not in the panel.
+- Switching and creating branches is left to the agents: the panel has no such actions.

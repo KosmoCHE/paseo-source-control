@@ -39,7 +39,9 @@ async function git(cwd: string, args: string[], { accept = [], timeout }: Option
     return stdout;
   } catch (error) {
     const failure = error as { code?: unknown; stdout?: string; stderr?: string; message: string };
-    if (typeof failure.code === "number" && accept.includes(failure.code)) return failure.stdout ?? "";
+    // An accepted code can still be a failure: `diff --no-index` exits 1 for a difference and for a missing file alike.
+    const answered = typeof failure.code === "number" && accept.includes(failure.code) && (failure.stdout || !failure.stderr);
+    if (answered) return failure.stdout ?? "";
     // git's own words are the useful part, and `git commit` says them on stdout; the command line stays in the cause.
     throw new Error(failure.stderr?.trim() || failure.stdout?.trim() || failure.message, { cause: error });
   }
@@ -94,11 +96,12 @@ export function parseStatus(out: string) {
 }
 
 export async function status({ cwd }: RpcInput<typeof statusRpc>): Promise<RpcOutput<typeof statusRpc>> {
-  const [porcelain, refs] = await Promise.all([
+  const [root, porcelain, refs] = await Promise.all([
+    git(cwd, ["rev-parse", "--show-toplevel"]),
     git(cwd, ["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all"]),
     git(cwd, ["for-each-ref", "--format=%(objectname) %(refname)"]),
   ]);
-  return { ...parseStatus(porcelain), refs: createHash("sha1").update(refs).digest("hex") };
+  return { root: root.replace(/\n$/, ""), ...parseStatus(porcelain), refs: createHash("sha1").update(refs).digest("hex") };
 }
 
 export async function stage({ cwd, files }: RpcInput<typeof stageRpc>) {
@@ -121,8 +124,8 @@ export async function discard({ cwd, files }: RpcInput<typeof discardRpc>) {
   return {};
 }
 
-export async function commit({ cwd, message }: RpcInput<typeof commitRpc>) {
-  await git(cwd, ["commit", "--message", message]);
+export async function commit({ cwd, message, amend }: RpcInput<typeof commitRpc>) {
+  await git(cwd, ["commit", ...(amend ? ["--amend"] : []), ...(message.trim() ? ["--message", message] : ["--no-edit"])]);
   return {};
 }
 
@@ -212,7 +215,7 @@ export async function diff({ cwd, source, file }: RpcInput<typeof diffRpc>): Pro
   const paths = pathsOf([file]);
   if (source.kind === "commit") return { diff: await git(cwd, ["show", ...AS_PATCH, source.hash, "--", ...paths]) };
   if (source.kind === "staged") return { diff: await git(cwd, ["diff", "--cached", "--find-renames", "--", ...paths]) };
-  // An untracked file has nothing to compare with; --no-index exits 1 when the two sides differ.
+  // An untracked file has nothing to compare with, so it is compared with nothing.
   if (file.status === "?") return { diff: await git(cwd, ["diff", "--no-index", "--", "/dev/null", file.path], { accept: [1] }) };
   return { diff: await git(cwd, ["diff", "--", ...paths]) };
 }
