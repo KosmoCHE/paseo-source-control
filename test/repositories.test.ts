@@ -44,7 +44,7 @@ test("the folder's own repository and those one level down", async (t) => {
   assert.deepEqual(await list("."), { listed: [".", "a", "b"], offered: null });
 
   const [own] = (await repositories({ cwd: top })).repositories;
-  assert.deepEqual(own, { root: top, name: top.slice(dirname(top).length + 1), branch: "main" });
+  assert.deepEqual(own, { root: top, name: top.slice(dirname(top).length + 1), branch: "main", upstream: null, ahead: 0, behind: 0 });
 });
 
 test("a folder inside a repository lists what is below it, and only offers the repository above", async (t) => {
@@ -104,6 +104,23 @@ test("a detached HEAD has no branch", async (t) => {
   git("commit", "--quiet", "--allow-empty", "--message=first");
   git("switch", "--quiet", "--detach");
   assert.equal((await repositories({ cwd: top })).repositories[0].branch, null);
+});
+
+test("how far a branch is from its upstream", async (t) => {
+  const { repo, at, top } = workspace(t);
+  repo("origin");
+  const git = (path: string, ...args: string[]) => execFileSync("git", ["-c", "user.name=Ada", "-c", "user.email=ada@example.com", ...args], { cwd: at(path) });
+  const commit = (path: string, message: string) => git(path, "commit", "--quiet", "--allow-empty", `--message=${message}`);
+  commit("origin", "first");
+  git(".", "clone", "--quiet", "origin", "clone");
+  commit("origin", "theirs");
+  commit("origin", "theirs too");
+  commit("clone", "mine");
+
+  const read = async () => (await repositories({ cwd: top })).repositories.find((repository) => repository.name === "clone");
+  assert.deepEqual(await read(), { root: at("clone"), name: "clone", branch: "main", upstream: "origin/main", ahead: 1, behind: 0 }); // what the upstream has gained is not known before a fetch
+  git("clone", "fetch", "--quiet");
+  assert.deepEqual(await read(), { root: at("clone"), name: "clone", branch: "main", upstream: "origin/main", ahead: 1, behind: 2 });
 });
 
 test("a settings file that cannot be used is reported", async (t) => {

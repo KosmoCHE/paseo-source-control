@@ -7,8 +7,10 @@ import { Pressable, TextInput, View } from "react-native";
 import { commitRpc, discardRpc, stageRpc, unstageRpc } from "../shared/git";
 import type { DiffSource, FileChange, Status } from "../shared/git";
 import { showDiff } from "./diffTab";
+import { FileTree } from "./Files";
 import { useCommand } from "./git";
-import { FileRow, Heading, IconButton, T, useHint, useHost } from "./ui";
+import { Heading, IconButton, T, useHint, useHost, useMenu } from "./ui";
+import type { MenuItem } from "./ui";
 
 const drafts = new Map<string, string>(); // repository → the message being written; outlives the panel, not the app
 
@@ -43,6 +45,7 @@ export function Changes({ cwd, workspaceId, status, folded, onFold }: Props) {
   const where = status.branch ?? `${status.head?.slice(0, 7)} (detached)`;
   const written = message.trim() !== "";
   const staged = status.staged.length > 0;
+  const canCommit = written && staged && !commit.isPending;
   const send = (amend: boolean) => commit.mutate({ message, amend }, { onSuccess: () => write("") });
   const pushed = status.upstream !== null && status.ahead === 0; // the last commit is already on the upstream
   const amend = () =>
@@ -54,13 +57,20 @@ export function Changes({ cwd, workspaceId, status, folded, onFold }: Props) {
           run: () => send(true),
         })
       : send(true);
-  const drop = (file: FileChange) =>
-    ask(
-      file.status === "?"
-        ? { title: "Delete file?", text: `${file.path} is untracked. It will be deleted.`, yes: "Delete", run: () => discard.mutate({ files: [file] }) }
-        : { title: "Discard changes?", text: `The changes in ${file.path} will be lost.`, yes: "Discard", run: () => discard.mutate({ files: [file] }) },
-    );
-  const group = (title: string, files: FileChange[], source: DiffSource, all: ReactNode, each: (file: FileChange) => ReactNode) => (
+  /** Discards one file, or everything in a folder: `path` is the row that was asked about. */
+  const drop = (files: FileChange[], path: string) => {
+    const untracked = files.filter((file) => file.status === "?").length;
+    const changed = files.length - untracked;
+    const count = (n: number, what: string) => `${n} ${what}${n === 1 ? "" : "s"}`;
+    const text =
+      files.length === 1
+        ? untracked
+          ? `${files[0].path} is untracked. It will be deleted.`
+          : `The changes in ${files[0].path} will be lost.`
+        : `In ${path}, ${[changed && `the changes in ${count(changed, "file")} will be lost`, untracked && `${count(untracked, "untracked file")} will be deleted`].filter(Boolean).join(" and ")}.`;
+    ask({ title: changed ? "Discard changes?" : files.length === 1 ? "Delete file?" : "Delete files?", text, yes: changed ? "Discard" : "Delete", run: () => discard.mutate({ files }) });
+  };
+  const group = (title: string, files: FileChange[], source: DiffSource, all: ReactNode, each: (files: FileChange[], path: string) => ReactNode) => (
     <Group title={title} files={files} folded={folded.includes(title)} onFold={() => onFold(title)} onOpen={(file) => showDiff({ workspaceId, cwd, source, file })} all={all} each={each} />
   );
   return (
@@ -75,22 +85,26 @@ export function Changes({ cwd, workspaceId, status, folded, onFold }: Props) {
           placeholderTextColor={c.foregroundMuted}
           style={{ minHeight: 56, padding: 6, borderWidth: 1, borderRadius: 4, borderColor: c.border, backgroundColor: c.surface2, color: c.foreground, fontSize: text, textAlignVertical: "top" }}
         />
-        <View style={{ flexDirection: "row", gap: 8 }}>
-          <Action label="Commit" hint="Commit the staged changes" icon="Check" primary enabled={written && staged && !commit.isPending} onPress={() => send(false)} />
-          {/* Folds what is staged into the last commit; a message, if one is written, replaces that commit's own. */}
-          <Action label="Amend" hint="Amend the last commit with the staged changes and, if written, the message" enabled={status.head !== null && (written || staged) && !commit.isPending} onPress={amend} />
-        </View>
+        <CommitButton
+          enabled={canCommit}
+          onCommit={() => send(false)}
+          more={[
+            { label: "Commit", enabled: canCommit, onPress: () => send(false) },
+            // Folds what is staged into the last commit; a message, if one is written, replaces that commit's own.
+            { label: "Commit (Amend)", enabled: status.head !== null && (written || staged) && !commit.isPending, onPress: amend },
+          ]}
+        />
       </View>
-      {group("Merge Changes", status.conflicts, { kind: "changes" }, null, (file) => (
-        <IconButton name="Plus" label={`Mark ${file.path} as resolved`} hint="Mark as resolved" onPress={() => stage.mutate({ files: [file] })} />
+      {group("Merge Changes", status.conflicts, { kind: "changes" }, null, (files, path) => (
+        <IconButton name="Plus" label={`Mark ${path} as resolved`} hint="Mark as resolved" onPress={() => stage.mutate({ files })} />
       ))}
       {group(
         "Staged Changes",
         status.staged,
         { kind: "staged" },
         <IconButton name="Minus" label="Unstage all changes" onPress={() => unstage.mutate({ files: status.staged })} />,
-        (file) => (
-          <IconButton name="Minus" label={`Unstage ${file.path}`} hint="Unstage changes" onPress={() => unstage.mutate({ files: [file] })} />
+        (files, path) => (
+          <IconButton name="Minus" label={`Unstage ${path}`} hint="Unstage changes" onPress={() => unstage.mutate({ files })} />
         ),
       )}
       {group(
@@ -98,10 +112,10 @@ export function Changes({ cwd, workspaceId, status, folded, onFold }: Props) {
         status.changes,
         { kind: "changes" },
         <IconButton name="Plus" label="Stage all changes" onPress={() => stage.mutate({ files: status.changes })} />,
-        (file) => (
+        (files, path) => (
           <>
-            <IconButton name="Undo2" label={`Discard changes in ${file.path}`} hint="Discard changes" onPress={() => drop(file)} />
-            <IconButton name="Plus" label={`Stage ${file.path}`} hint="Stage changes" onPress={() => stage.mutate({ files: [file] })} />
+            <IconButton name="Undo2" label={`Discard changes in ${path}`} hint="Discard changes" onPress={() => drop(files, path)} />
+            <IconButton name="Plus" label={`Stage ${path}`} hint="Stage changes" onPress={() => stage.mutate({ files })} />
           </>
         ),
       )}
@@ -129,27 +143,37 @@ export function Changes({ cwd, workspaceId, status, folded, onFold }: Props) {
   );
 }
 
-/** One of the buttons under the commit box. */
-function Action({ label, hint, icon, primary, enabled, onPress }: { label: string; hint: string; icon?: string; primary?: boolean; enabled: boolean; onPress: () => void }) {
+/** The button under the commit box, as VS Code splits it: the commit itself, and an arrow that opens the other ways to commit. */
+function CommitButton({ enabled, onCommit, more }: { enabled: boolean; onCommit: () => void; more: MenuItem[] }) {
   const { c, text } = useHost();
-  const ink = primary ? c.accentForeground : c.foreground;
+  const menu = useMenu();
+  const arrow = useHint("More actions");
   return (
-    <Pressable
-      {...useHint(hint)}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityState={{ disabled: !enabled }}
-      onPress={enabled ? onPress : undefined} // not the disabled prop: that would switch off hovering, and the hint with it
-      style={[
-        { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 6, paddingHorizontal: 12, borderRadius: 4, borderWidth: 1, opacity: enabled ? 1 : 0.5 },
-        primary ? { flex: 1, backgroundColor: c.accent, borderColor: c.accent } : { backgroundColor: c.surface2, borderColor: c.border },
-      ]}
-    >
-      {icon && <Icon name={icon} size={text + 1} color={ink} />}
-      <T weight="600" color={ink}>
-        {label}
-      </T>
-    </Pressable>
+    <View style={{ flexDirection: "row", borderRadius: 4, overflow: "hidden", backgroundColor: c.accent }}>
+      <Pressable
+        {...useHint("Commit the staged changes")}
+        accessibilityRole="button"
+        accessibilityLabel="Commit"
+        accessibilityState={{ disabled: !enabled }}
+        onPress={enabled ? onCommit : undefined} // not the disabled prop: that would switch off hovering, and the hint with it
+        style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 6, opacity: enabled ? 1 : 0.5 }}
+      >
+        <Icon name="Check" size={text + 1} color={c.accentForeground} />
+        <T weight="600" color={c.accentForeground}>
+          Commit
+        </T>
+      </Pressable>
+      <View style={{ width: 1, marginVertical: 5, backgroundColor: c.accentForeground, opacity: 0.4 }} />
+      <Pressable
+        {...arrow}
+        accessibilityRole="button"
+        accessibilityLabel="More commit actions"
+        onPress={() => arrow.ref.current && menu(arrow.ref.current, more)}
+        style={{ justifyContent: "center", paddingHorizontal: 8 }}
+      >
+        <Icon name="ChevronDown" size={text + 1} color={c.accentForeground} />
+      </Pressable>
+    </View>
   );
 }
 
@@ -160,10 +184,10 @@ interface GroupProps {
   onFold: () => void;
   onOpen: (file: FileChange) => void;
   all: ReactNode; // an action on the whole group
-  each: (file: FileChange) => ReactNode; // the actions on one file
+  each: (files: FileChange[], path: string) => ReactNode; // the actions on one row: a file, or the files in a folder
 }
 
-/** A titled list of files. An empty group is not shown at all. */
+/** A titled tree of files. An empty group is not shown at all. */
 function Group({ title, files, folded, onFold, onOpen, all, each }: GroupProps) {
   if (!files.length) return null;
   return (
@@ -171,7 +195,7 @@ function Group({ title, files, folded, onFold, onOpen, all, each }: GroupProps) 
       <Heading title={title} folded={folded} onFold={onFold} count={files.length}>
         {all}
       </Heading>
-      {!folded && files.map((file) => <FileRow key={file.path} file={file} indent={27} onPress={() => onOpen(file)} actions={each(file)} />)}
+      {!folded && <FileTree files={files} indent={20} onOpen={onOpen} actions={each} />}
     </View>
   );
 }

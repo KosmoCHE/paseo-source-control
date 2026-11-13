@@ -36,6 +36,9 @@ export const repositorySchema = z.object({
   root: z.string(),
   name: z.string(),
   branch: z.string().nullable(), // null when HEAD is detached
+  upstream: z.string().nullable(), // the branch it follows on a remote, if any
+  ahead: z.number(), // commits the upstream lacks, and
+  behind: z.number(), // commits only the upstream has, as of the last fetch
 });
 export type Repository = z.infer<typeof repositorySchema>;
 

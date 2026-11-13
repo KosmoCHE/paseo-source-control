@@ -15,7 +15,7 @@ import type { RpcInput, RpcOutput } from "@getpaseo/plugin";
 import stripJsonComments from "strip-json-comments";
 import { z } from "zod";
 import type { repositoriesRpc } from "../shared/git";
-import { git } from "./git.ts"; // with its extension, so that the tests can load this module without a bundler
+import { git, parseStatus } from "./git.ts"; // with its extension, so that the tests can load this module without a bundler
 
 // VS Code's own defaults.
 const settingsSchema = z.object({
@@ -85,7 +85,11 @@ export async function repositories({ cwd }: RpcInput<typeof repositoriesRpc>): P
   }
   for (const path of settings["git.ignoredRepositories"]) roots.delete(resolve(folder, path));
 
-  const describe = async (root: string) => ({ root, name: basename(root), branch: (await git(root, ["branch", "--show-current"])).trim() || null });
+  const describe = async (root: string) => {
+    // Only the lines about the branch are wanted, so the untracked files are not looked for.
+    const { branch, upstream, ahead, behind } = parseStatus(await git(root, ["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=no"]));
+    return { root, name: basename(root), branch, upstream, ahead, behind };
+  };
   const inside = (root: string) => root === folder || root.startsWith(folder + sep);
   const parents = settings["git.openRepositoryInParentFolders"];
   const listed = [...roots].filter((root) => parents === "always" || inside(root));

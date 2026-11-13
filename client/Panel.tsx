@@ -17,7 +17,7 @@ import { CommitItem, GraphHeader } from "./Graph";
 import { layout as lanes } from "./lanes";
 import { Repositories } from "./Repositories";
 import { Split, sizesSchema } from "./Split";
-import { HintHost, HostProvider, Notice, T, useHost } from "./ui";
+import { HostProvider, Notice, PanelRoot, T, useHost } from "./ui";
 
 const PAGE = 200; // commits read at first, and added by each "Load more"
 const NONE: Commit[] = [];
@@ -37,7 +37,7 @@ export function Panel({ theme, layout, workspaceId, tab }: PluginWorkspacePanelP
   const host = useMemo(() => ({ theme, layout }), [theme, layout]);
   return (
     <HostProvider value={host}>
-      <HintHost>{directory === null ? <Notice>This workspace is unavailable.</Notice> : <Workspace key={directory} directory={directory} workspaceId={workspaceId} tab={tab} />}</HintHost>
+      <PanelRoot>{directory === null ? <Notice>This workspace is unavailable.</Notice> : <Workspace key={directory} directory={directory} workspaceId={workspaceId} tab={tab} />}</PanelRoot>
     </HostProvider>
   );
 }

@@ -82,7 +82,10 @@ async function found(name: string) {
 }
 
 void (async () => {
-  for (const name of (params.get("press") ?? "").split("|").filter(Boolean)) (await found(name)).click();
+  for (const name of (params.get("press") ?? "").split("|").filter(Boolean)) {
+    (await found(name)).click();
+    await wait(100); // the next button is looked for on the page as the click left it, not as it was
+  }
   const [line, by] = (params.get("drag") ?? "").split(":");
   if (line) {
     const element = await found(line);

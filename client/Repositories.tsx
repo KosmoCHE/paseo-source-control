@@ -3,7 +3,6 @@
 import { Icon } from "@getpaseo/plugin/client/ui";
 import { Pressable, View } from "react-native";
 import type { Repository } from "../shared/git";
-import { useStatus } from "./git";
 import { Heading, T, Tint, useHost } from "./ui";
 
 interface Props {
@@ -35,29 +34,17 @@ export function Repositories({ list, selected, folded, onFold, onSelect }: Props
             <T lines={1} weight={chosen ? "600" : undefined} style={{ flex: 1, minWidth: 0 }}>
               {repository.name}
             </T>
-            {chosen ? <LiveBranch repository={repository} /> : <Branch name={repository.branch ?? "detached"} />}
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 3, flexShrink: 0, maxWidth: "60%" }}>
+              <Icon name="GitBranch" size={small + 1} color={c.foregroundMuted} />
+              <T size={small} color={c.foregroundMuted} lines={1} style={{ flexShrink: 1, minWidth: 0 }}>
+                {repository.branch ?? "detached"}
+              </T>
+              {/* What a pull would bring and a push would send, as VS Code counts them beside the branch. */}
+              {(repository.ahead > 0 || repository.behind > 0) && <T size={small} color={c.foreground}>{` ${repository.behind}↓ ${repository.ahead}↑`}</T>}
+            </View>
           </Pressable>
         );
       })}
     </View>
   );
-}
-
-function Branch({ name, ahead = 0, behind = 0 }: { name: string; ahead?: number; behind?: number }) {
-  const { c, small } = useHost();
-  return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 3, flexShrink: 0, maxWidth: "50%" }}>
-      <Icon name="GitBranch" size={small + 1} color={c.foregroundMuted} />
-      <T size={small} color={c.foregroundMuted} lines={1} style={{ flexShrink: 1, minWidth: 0 }}>
-        {name + (ahead || behind ? `  ↑${ahead} ↓${behind}` : "")}
-      </T>
-    </View>
-  );
-}
-
-/** The selected repository is being read anyway: its branch as it is now, and how far it is from its upstream. */
-function LiveBranch({ repository }: { repository: Repository }) {
-  const { data } = useStatus(repository.root);
-  if (!data) return <Branch name={repository.branch ?? "detached"} />;
-  return <Branch name={data.branch ?? `${data.head?.slice(0, 7)}`} ahead={data.ahead} behind={data.behind} />;
 }

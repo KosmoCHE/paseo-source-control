@@ -12,10 +12,11 @@ import type { ViewStyle } from "react-native";
 import { showRpc, syncRpc } from "../shared/git";
 import type { Commit, Ref, Scope } from "../shared/git";
 import { showDiff } from "./diffTab";
+import { FileTree } from "./Files";
 import { key, useCommand } from "./git";
 import { width } from "./lanes";
 import type { Rail } from "./lanes";
-import { FileRow, IconButton, Notice, T, Tint, useHint, useHost } from "./ui";
+import { IconButton, Notice, T, Tint, useHint, useHost } from "./ui";
 
 const LANE = 12; // between two lanes
 const LINE = 2;
@@ -200,15 +201,7 @@ function Details({ cwd, workspaceId, commit, rail }: Pick<ItemProps, "cwd" | "wo
             <T size={small + 1} selectable style={{ paddingRight: 8 }}>
               {detail.data.message}
             </T>
-            <View>
-              {detail.data.files.map((file) => (
-                <FileRow
-                  key={file.path}
-                  file={file}
-                  onPress={() => showDiff({ workspaceId, cwd, source: { kind: "commit", hash: commit.hash }, file })}
-                />
-              ))}
-            </View>
+            <FileTree files={detail.data.files} indent={0} onOpen={(file) => showDiff({ workspaceId, cwd, source: { kind: "commit", hash: commit.hash }, file })} />
           </>
         )}
       </View>

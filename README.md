@@ -2,12 +2,12 @@
 
 A [Paseo](https://paseo.sh) plugin that adds a Source Control panel to every workspace, modelled on the one in VS Code: the workspace's repositories, the selected repository's working tree, and its commit graph. Each scrolls on its own, and the lines between them drag to resize them.
 
-- **Repositories**: the repositories VS Code would list for the workspace's folder. Selecting one shows it in the rest of the panel.
-- **Changes**: commit message, Commit and Amend buttons, staged files, changed files, files in conflict. Stage, unstage and discard per file; stage or unstage everything from the group's title. Amend folds what is staged into the last commit, and rewords it when a message is written.
-- **Graph**: one row per commit with its lanes, merges, branch names, remote branches and tags. The scope switch shows all branches (`All`, the default) or the checked-out branch with its upstream (`Auto`). Selecting a commit shows its message and changed files. Fetch, pull and push sit in the title bar.
+- **Repositories**: the repositories VS Code would list for the workspace's folder, each with its branch and, when it differs from its upstream, the commits to pull and to push (`2↓ 1↑`). Selecting one shows it in the rest of the panel.
+- **Changes**: commit message, the Commit button, and the staged files, changed files and files in conflict as trees of folders. Stage, unstage and discard a file or everything in a folder; stage or unstage everything from the group's title. The arrow at the right of the Commit button opens the other ways to commit: **Commit (Amend)** folds what is staged into the last commit, and rewords it when a message is written.
+- **Graph**: one row per commit with its lanes, merges, branch names, remote branches and tags. The scope switch shows all branches (`All`, the default) or the checked-out branch with its upstream (`Auto`). Selecting a commit shows its message and its changed files, as a tree too. Fetch, pull and push sit in the title bar.
 - **Diff**: selecting a file opens its diff in a workspace tab.
 
-The panel reads the selected repository again every three seconds, so commits made by agents show up without a refresh. Resting the pointer on a button says what it does.
+The panel reads the selected repository again every three seconds, and the list of repositories every ten, so commits made by agents show up without a refresh. Nothing is fetched on its own: the commits to pull are counted against what the last fetch brought. Resting the pointer on a button says what it does.
 
 ## Which repositories are listed
 
@@ -63,9 +63,11 @@ client/Split.tsx        the three sections and the lines that resize them
 client/lanes.ts    gives every commit a lane
 client/Graph.tsx   draws the graph rows
 client/Changes.tsx the working tree part
+client/tree.ts     arranges changed files as a tree of folders
+client/Files.tsx   draws that tree
 client/Diff.tsx    the diff tab
 client/Panel.tsx   puts the panel together
-test/              node:test suites for the git reader, the repository search, the lanes and the patch reader
+test/              node:test suites for the git reader, the repository search, the lanes, the file tree and the patch reader
 preview/           the panel in a browser, for development
 ```
 
