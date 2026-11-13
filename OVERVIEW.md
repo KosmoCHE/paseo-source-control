@@ -6,7 +6,7 @@ In the working tree part you write a commit message, stage and unstage files, di
 
 The graph draws one row per commit with its branch lanes, merges, branch names, remote branches and tags. It shows all branches, or only the checked-out branch and its upstream. Selecting a commit shows its message and the files it changed. Fetch, pull and push sit in the graph's title bar.
 
-Selecting a file anywhere in the panel opens its diff in a workspace tab. The three parts of the panel scroll separately, and the lines between them drag to resize them.
+Selecting a file anywhere in the panel opens its diff in a workspace tab. The three parts of the panel scroll separately, the lines between them drag to resize them, and the repository list and the graph fold from their title bars.
 
 The panel reads the selected repository again every three seconds, so commits made by agents appear on their own. It does not fetch on its own: the commits to pull are counted against what the last fetch brought.
 

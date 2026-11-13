@@ -17,7 +17,7 @@ import { FileTree } from "./Files";
 import { key, useCommand } from "./git";
 import { width } from "./lanes";
 import type { Rail } from "./lanes";
-import { IconButton, Notice, T, Tint, useHint, useHost } from "./ui";
+import { Heading, IconButton, Notice, T, Tint, useHint, useHost } from "./ui";
 
 const LANE = 12; // between two lanes
 const LINE = 2;
@@ -210,36 +210,38 @@ function Details({ cwd, workspaceId, commit, rail }: Pick<ItemProps, "cwd" | "wo
   );
 }
 
-/** The graph's title bar: which branches to show, and the remote. */
-export function GraphHeader({ cwd, scope, onScope }: { cwd: string; scope: Scope; onScope: (scope: Scope) => void }) {
-  const { c, row, small } = useHost();
+/** The graph's title bar: it folds the graph, and while the graph shows, picks its branches and reaches the remote. */
+export function GraphHeader({ cwd, scope, onScope, folded, onFold }: { cwd: string; scope: Scope; onScope: (scope: Scope) => void; folded: boolean; onFold: () => void }) {
+  const { c, small } = useHost();
   const toast = useToast();
   const queries = useQueryClient();
   const sync = useCommand(syncRpc, cwd);
   const run = (action: "fetch" | "pull" | "push", done: string) => sync.mutate({ action }, { onSuccess: () => toast.show(done, { variant: "success" }) });
   const scopeHint = useHint(scope === "all" ? "All branches are shown. Show only the current branch and its upstream" : "The current branch and its upstream are shown. Show all branches");
   return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 4, height: row + 6, paddingHorizontal: 8 }}>
-      <T size={small} weight="600" color={c.foregroundMuted} style={{ flex: 1, textTransform: "uppercase" }}>
-        Graph
-      </T>
-      <Pressable
-        {...scopeHint}
-        accessibilityRole="button"
-        accessibilityLabel={scope === "all" ? "Showing all branches. Show the current branch only" : "Showing the current branch. Show all branches"}
-        hitSlop={4}
-        onPress={() => onScope(scope === "all" ? "current" : "all")}
-        style={{ flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 4 }}
-      >
-        <Icon icon={codicon.gitBranch} size={small + 3} color={c.foregroundMuted} />
-        <T size={small} color={c.foregroundMuted}>
-          {scope === "all" ? "All" : "Auto"}
-        </T>
-      </Pressable>
-      <IconButton icon={codicon.gitFetch} label="Fetch" disabled={sync.isPending} onPress={() => run("fetch", "Fetched")} />
-      <IconButton icon={codicon.repoPull} label="Pull" disabled={sync.isPending} onPress={() => run("pull", "Pulled")} />
-      <IconButton icon={codicon.repoPush} label="Push" disabled={sync.isPending} onPress={() => run("push", "Pushed")} />
-      <IconButton icon={codicon.refresh} label="Refresh" onPress={() => void queries.invalidateQueries({ queryKey: key() })} />
-    </View>
+    <Heading title="Graph" folded={folded} onFold={onFold}>
+      {/* A folded section keeps its actions to itself, as in VS Code. */}
+      {!folded && (
+        <>
+          <Pressable
+            {...scopeHint}
+            accessibilityRole="button"
+            accessibilityLabel={scope === "all" ? "Showing all branches. Show the current branch only" : "Showing the current branch. Show all branches"}
+            hitSlop={4}
+            onPress={() => onScope(scope === "all" ? "current" : "all")}
+            style={{ flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 4 }}
+          >
+            <Icon icon={codicon.gitBranch} size={small + 3} color={c.foregroundMuted} />
+            <T size={small} color={c.foregroundMuted}>
+              {scope === "all" ? "All" : "Auto"}
+            </T>
+          </Pressable>
+          <IconButton icon={codicon.gitFetch} label="Fetch" disabled={sync.isPending} onPress={() => run("fetch", "Fetched")} />
+          <IconButton icon={codicon.repoPull} label="Pull" disabled={sync.isPending} onPress={() => run("pull", "Pulled")} />
+          <IconButton icon={codicon.repoPush} label="Push" disabled={sync.isPending} onPress={() => run("push", "Pushed")} />
+          <IconButton icon={codicon.refresh} label="Refresh" onPress={() => void queries.invalidateQueries({ queryKey: key() })} />
+        </>
+      )}
+    </Heading>
   );
 }

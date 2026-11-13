@@ -1,5 +1,6 @@
 // The panel's three sections, stacked. The line between two of them drags to move the border
 // it marks, as the sashes between VS Code's panes do: one section grows by what the other gives up.
+// A folded section is as tall as its title bar, and the line beside it does not drag.
 
 import { useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -14,14 +15,16 @@ export type Sizes = z.infer<typeof sizesSchema>;
 
 const CAP = { repositories: "25%", changes: "40%" } as const;
 const LEAST = 48; // the height a section keeps when its neighbour is dragged over it
+const TITLE: ViewStyle = { flexGrow: 0, flexShrink: 0 }; // a folded section: as tall as what is left of it
+const REST: ViewStyle = { flex: 1, minHeight: 0 }; // the section that takes the room the others leave
 
 interface Props {
   sizes: Sizes;
   onSizes: (sizes: Sizes) => void; // once, when a drag ends
   repositories: ReactNode;
-  folded: boolean; // the repository list is folded: it is as tall as its content, and its line does not drag
   changes: ReactNode;
   graph: ReactNode;
+  folded: { repositories: boolean; graph: boolean }; // with the graph folded, the changes take the room it leaves
 }
 
 export function Split({ sizes, onSizes, repositories, folded, changes, graph }: Props) {
@@ -40,7 +43,8 @@ export function Split({ sizes, onSizes, repositories, folded, changes, graph }: 
   const moveUpper = (dy: number) => {
     const { all, repositories, changes } = held.current;
     const move = within(dy, LEAST - repositories, changes - LEAST);
-    setNow({ repositories: (repositories + move) / all, changes: (changes - move) / all });
+    // With the graph folded the changes have no share of their own to give up: they take what is left.
+    setNow((sizes) => ({ repositories: (repositories + move) / all, changes: folded.graph ? sizes.changes : (changes - move) / all }));
   };
   const moveLower = (dy: number) => {
     const { all, changes, graph } = held.current;
@@ -51,15 +55,15 @@ export function Split({ sizes, onSizes, repositories, folded, changes, graph }: 
   const pane = (share: number | null, cap: `${number}%`): ViewStyle => (share === null ? { flexGrow: 0, maxHeight: cap } : { flexGrow: 0, flexShrink: 0, height: `${share * 100}%` });
   return (
     <View style={{ flex: 1 }} onLayout={measure("all")}>
-      <ScrollView style={folded ? { flexGrow: 0, flexShrink: 0 } : pane(now.repositories, CAP.repositories)} onLayout={measure("repositories")}>
+      <ScrollView style={folded.repositories ? TITLE : pane(now.repositories, CAP.repositories)} onLayout={measure("repositories")}>
         {repositories}
       </ScrollView>
-      <Divider label="Resize Repositories" fixed={folded} onStart={begin} onDrag={moveUpper} onEnd={end} />
-      <ScrollView style={pane(now.changes, CAP.changes)} keyboardShouldPersistTaps="handled" onLayout={measure("changes")}>
+      <Divider label="Resize Repositories" fixed={folded.repositories} onStart={begin} onDrag={moveUpper} onEnd={end} />
+      <ScrollView style={folded.graph ? REST : pane(now.changes, CAP.changes)} keyboardShouldPersistTaps="handled" onLayout={measure("changes")}>
         {changes}
       </ScrollView>
-      <Divider label="Resize Changes" onStart={begin} onDrag={moveLower} onEnd={end} />
-      <View style={{ flex: 1, minHeight: 0 }} onLayout={measure("graph")}>
+      <Divider label="Resize Changes" fixed={folded.graph} onStart={begin} onDrag={moveLower} onEnd={end} />
+      <View style={folded.graph ? TITLE : REST} onLayout={measure("graph")}>
         {graph}
       </View>
     </View>

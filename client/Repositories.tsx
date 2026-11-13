@@ -31,7 +31,8 @@ export function Repositories({ list, selected, folded, onFold, onSelect }: Props
             style={{ flexDirection: "row", alignItems: "center", gap: 6, height: row, paddingLeft: 27, paddingRight: 8 }}
           >
             {chosen && <Tint color={c.accent} opacity={0.14} />}
-            <Icon icon={codicon.repo} size={small + 5} color={c.foregroundMuted} />
+            {/* As in VS Code, the selected repository is ticked once there is more than one to choose from. */}
+            <Icon icon={chosen && list.length > 1 ? codicon.repoSelected : codicon.repo} size={small + 5} color={c.foregroundMuted} />
             <T lines={1} weight={chosen ? "600" : undefined} style={{ flex: 1, minWidth: 0 }}>
               {repository.name}
             </T>

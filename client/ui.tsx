@@ -189,8 +189,8 @@ export function IconButton({ icon, label, hint, onPress, disabled }: { icon: Cod
   );
 }
 
-/** The title bar of a section that folds. `children` are its actions. */
-export function Heading({ title, folded, onFold, count, children }: { title: string; folded: boolean; onFold: () => void; count: number; children?: ReactNode }) {
+/** The title bar of a section that folds. `children` are its actions, `count` how many things it holds. */
+export function Heading({ title, folded, onFold, count, children }: { title: string; folded: boolean; onFold: () => void; count?: number; children?: ReactNode }) {
   const { c, row, small } = useHost();
   return (
     <Pressable accessibilityRole="button" accessibilityLabel={title} accessibilityState={{ expanded: !folded }} onPress={onFold} style={{ flexDirection: "row", alignItems: "center", gap: 4, height: row, paddingHorizontal: 8 }}>
@@ -199,9 +199,11 @@ export function Heading({ title, folded, onFold, count, children }: { title: str
         {title}
       </T>
       {children}
-      <T size={small} color={c.foregroundMuted} style={{ minWidth: 12, textAlign: "center" }}>
-        {String(count)}
-      </T>
+      {count !== undefined && (
+        <T size={small} color={c.foregroundMuted} style={{ minWidth: 12, textAlign: "center" }}>
+          {String(count)}
+        </T>
+      )}
     </Pressable>
   );
 }
