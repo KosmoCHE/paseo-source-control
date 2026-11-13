@@ -1,8 +1,10 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { commit, diff, discard, log, show, stage, status, sync, unstage } from "./server/git";
-import { commitRpc, diffRpc, discardRpc, logRpc, showRpc, stageRpc, statusRpc, syncRpc, unstageRpc } from "./shared/git";
+import { repositories } from "./server/repositories";
+import { commitRpc, diffRpc, discardRpc, logRpc, repositoriesRpc, showRpc, stageRpc, statusRpc, syncRpc, unstageRpc } from "./shared/git";
 
 export default function contribute(server: PluginServerContext) {
+  server.handle(repositoriesRpc, repositories);
   server.handle(statusRpc, status);
   server.handle(logRpc, log);
   server.handle(showRpc, show);

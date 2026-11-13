@@ -1,8 +1,8 @@
 // The browser preview: the Source Control panel as a sidebar, the diff tab beside it.
 //
 // Address parameters: cwd (the repository), theme=light, compact, width (of the sidebar),
-// and press, a "|"-separated list of button names to click in turn once they appear,
-// which is how a screenshot reaches a state behind a click.
+// press, a "|"-separated list of button names to click in turn once they appear, and hover,
+// one button to rest the pointer on after that: how a screenshot reaches a state behind them.
 
 import type { PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -65,13 +65,18 @@ createRoot(document.getElementById("root")!).render(
   </QueryClientProvider>,
 );
 
-const presses = (params.get("press") ?? "").split("|").filter(Boolean);
-const timer = setInterval(() => {
-  if (!presses.length) return clearInterval(timer);
-  // A button is known by its label, or by its text when it has none; an exact match wins over a prefix.
+// A button is known by its label, or by its text when it has none; an exact match wins over a prefix.
+function button(name: string) {
   const named = [...document.querySelectorAll<HTMLElement>("[aria-label], [role=button]")].map((element) => ({ element, name: element.getAttribute("aria-label") ?? element.textContent ?? "" }));
-  const target = (named.find(({ name }) => name === presses[0]) ?? named.find(({ name }) => name.startsWith(presses[0])))?.element;
-  if (!target) return;
-  presses.shift();
-  target.click();
+  return (named.find((candidate) => candidate.name === name) ?? named.find((candidate) => candidate.name.startsWith(name)))?.element;
+}
+
+const presses = (params.get("press") ?? "").split("|").filter(Boolean);
+const hover = params.get("hover");
+const timer = setInterval(() => {
+  const target = button(presses[0] ?? hover ?? "");
+  if (!target) return void (presses.length || hover || clearInterval(timer));
+  if (presses.shift()) return target.click();
+  target.dispatchEvent(new PointerEvent("pointerenter", { pointerType: "mouse" }));
+  clearInterval(timer);
 }, 100);

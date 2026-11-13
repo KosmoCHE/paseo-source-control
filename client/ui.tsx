@@ -2,7 +2,7 @@
 
 import type { PluginHostProps } from "@getpaseo/plugin/client";
 import { Icon } from "@getpaseo/plugin/client/ui";
-import { createContext, useContext } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Pressable, Text, View } from "react-native";
 import type { StyleProp, TextStyle } from "react-native";
@@ -52,19 +52,110 @@ export function Tint({ color, opacity }: { color: string; opacity: number }) {
   return <View style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0, backgroundColor: color, opacity, pointerEvents: "none" }} />;
 }
 
-export function IconButton({ name, label, onPress, disabled }: { name: string; label: string; onPress: () => void; disabled?: boolean }) {
+// --- hints ------------------------------------------------------------------------
+
+interface Hint {
+  text: string;
+  x: number; // the button's box, inside the panel
+  y: number;
+  width: number;
+  height: number;
+  panel: { width: number; height: number };
+}
+const HintContext = createContext<{ show(button: View, text: string): void; hide(): void } | null>(null);
+
+/** The panel's root. Hints are drawn here, over everything else, so that no list can cut them off. */
+export function HintHost({ children }: { children: ReactNode }) {
+  const { c, small } = useHost();
+  const root = useRef<View>(null);
+  const [hint, setHint] = useState<Hint | null>(null);
+  const hints = useMemo(
+    () => ({
+      show(button: View, text: string) {
+        root.current?.measureInWindow((left, top, width, height) =>
+          button.measureInWindow((x, y, w, h) => setHint({ text, x: x - left, y: y - top, width: w, height: h, panel: { width, height } })),
+        );
+      },
+      hide: () => setHint(null),
+    }),
+    [],
+  );
+  // Under the button and towards the middle of the panel; over the button when there is no room below.
+  const place = (at: Hint) => ({
+    ...(at.x + at.width / 2 < at.panel.width / 2 ? { left: Math.max(4, at.x) } : { right: Math.max(4, at.panel.width - at.x - at.width) }),
+    ...(at.y + at.height + 32 < at.panel.height ? { top: at.y + at.height + 4 } : { bottom: at.panel.height - at.y + 4 }),
+  });
+  return (
+    <HintContext.Provider value={hints}>
+      <View ref={root} style={{ flex: 1, backgroundColor: c.surface0 }}>
+        {children}
+        {hint && (
+          <View
+            style={[
+              { position: "absolute", maxWidth: 260, paddingVertical: 3, paddingHorizontal: 7, borderWidth: 1, borderRadius: 4, borderColor: c.border, backgroundColor: c.surface2, pointerEvents: "none" },
+              place(hint),
+            ]}
+          >
+            <T size={small}>{hint.text}</T>
+          </View>
+        )}
+      </View>
+    </HintContext.Provider>
+  );
+}
+
+/** Makes a Pressable say what it does once the pointer has rested on it. Spread the result into it. */
+export function useHint(text: string) {
+  const hints = useContext(HintContext);
+  if (!hints) throw new Error("useHint needs a HintHost above it");
+  const ref = useRef<View>(null);
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const hide = () => {
+    clearTimeout(timer.current);
+    hints.hide();
+  };
+  useEffect(() => hide, []); // a button that goes away takes its hint with it
+  return {
+    ref,
+    onHoverIn: () => {
+      timer.current = setTimeout(() => ref.current && hints.show(ref.current, text), 500);
+    },
+    onHoverOut: hide,
+    onPressIn: hide,
+  };
+}
+
+/** `hint` is what hovering shows; it is the label unless the label names a file. */
+export function IconButton({ name, label, hint, onPress, disabled }: { name: string; label: string; hint?: string; onPress: () => void; disabled?: boolean }) {
   const { c, compact } = useHost();
   return (
     <Pressable
+      {...useHint(hint ?? label)}
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityState={{ disabled }}
-      disabled={disabled}
       hitSlop={4}
-      onPress={onPress}
+      onPress={disabled ? undefined : onPress} // not the disabled prop: that would switch off hovering, and the hint with it
       style={({ pressed }) => ({ padding: compact ? 6 : 3, borderRadius: 4, opacity: disabled ? 0.4 : pressed ? 0.6 : 1 })}
     >
       <Icon name={name} size={compact ? 18 : 15} color={c.foregroundMuted} />
+    </Pressable>
+  );
+}
+
+/** The title bar of a section that folds. `children` are its actions. */
+export function Heading({ title, folded, onFold, count, children }: { title: string; folded: boolean; onFold: () => void; count: number; children?: ReactNode }) {
+  const { c, row, small } = useHost();
+  return (
+    <Pressable accessibilityRole="button" accessibilityLabel={title} accessibilityState={{ expanded: !folded }} onPress={onFold} style={{ flexDirection: "row", alignItems: "center", gap: 4, height: row, paddingHorizontal: 8 }}>
+      <Icon name={folded ? "ChevronRight" : "ChevronDown"} size={small + 3} color={c.foregroundMuted} />
+      <T size={small} weight="600" color={c.foregroundMuted} lines={1} style={{ flex: 1, minWidth: 0, textTransform: "uppercase" }}>
+        {title}
+      </T>
+      {children}
+      <T size={small} color={c.foregroundMuted} style={{ minWidth: 12, textAlign: "center" }}>
+        {String(count)}
+      </T>
     </Pressable>
   );
 }

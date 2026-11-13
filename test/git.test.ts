@@ -2,7 +2,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
@@ -166,28 +166,6 @@ test("history carries parents and refs, and a merge shows what it brought in", a
   const before = (await status({ cwd })).refs;
   git("tag", "v2");
   assert.notEqual((await status({ cwd })).refs, before);
-});
-
-test("a workspace inside the repository: files are named from the root", async (t) => {
-  const { cwd, git, write } = repository(t);
-  mkdirSync(join(cwd, "app"));
-  mkdirSync(join(cwd, "docs"));
-  write("docs/a.md", "one\n");
-  git("add", ".");
-  git("commit", "--quiet", "--message=first");
-  write("docs/a.md", "one\ntwo\n");
-  write("docs/new.md", "new\n");
-
-  const now = await status({ cwd: join(cwd, "app") });
-  assert.equal(now.root, realpathSync(cwd));
-  assert.deepEqual(now.changes, [
-    { path: "docs/a.md", status: "M" },
-    { path: "docs/new.md", status: "?" },
-  ]);
-  assert.match((await diff({ cwd: now.root, source: { kind: "changes" }, file: now.changes[0] })).diff, /^\+two$/m);
-  assert.match((await diff({ cwd: now.root, source: { kind: "changes" }, file: now.changes[1] })).diff, /^\+new$/m);
-  await stage({ cwd: now.root, files: now.changes });
-  assert.equal((await status({ cwd: join(cwd, "app") })).staged.length, 2);
 });
 
 test("an untracked file that has gone is an error, not an empty diff", async (t) => {

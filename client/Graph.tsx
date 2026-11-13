@@ -15,7 +15,7 @@ import { showDiff } from "./diffTab";
 import { key, useCommand } from "./git";
 import { width } from "./lanes";
 import type { Rail } from "./lanes";
-import { FileRow, IconButton, Notice, T, Tint, useHost } from "./ui";
+import { FileRow, IconButton, Notice, T, Tint, useHint, useHost } from "./ui";
 
 const LANE = 12; // between two lanes
 const LINE = 2;
@@ -223,12 +223,14 @@ export function GraphHeader({ cwd, scope, onScope }: { cwd: string; scope: Scope
   const queries = useQueryClient();
   const sync = useCommand(syncRpc, cwd);
   const run = (action: "fetch" | "pull" | "push", done: string) => sync.mutate({ action }, { onSuccess: () => toast.show(done, { variant: "success" }) });
+  const scopeHint = useHint(scope === "all" ? "All branches are shown. Show only the current branch and its upstream" : "The current branch and its upstream are shown. Show all branches");
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 4, height: row + 6, paddingHorizontal: 8, borderTopWidth: 1, borderColor: c.border }}>
       <T size={small} weight="600" color={c.foregroundMuted} style={{ flex: 1, textTransform: "uppercase" }}>
         Graph
       </T>
       <Pressable
+        {...scopeHint}
         accessibilityRole="button"
         accessibilityLabel={scope === "all" ? "Showing all branches. Show the current branch only" : "Showing the current branch. Show all branches"}
         hitSlop={4}

@@ -33,7 +33,7 @@ interface Options {
   timeout?: number;
 }
 
-async function git(cwd: string, args: string[], { accept = [], timeout }: Options = {}): Promise<string> {
+export async function git(cwd: string, args: string[], { accept = [], timeout }: Options = {}): Promise<string> {
   try {
     const { stdout } = await run("git", args, { cwd, env: ENV, timeout, maxBuffer: 256 * 1024 * 1024 });
     return stdout;
@@ -96,12 +96,11 @@ export function parseStatus(out: string) {
 }
 
 export async function status({ cwd }: RpcInput<typeof statusRpc>): Promise<RpcOutput<typeof statusRpc>> {
-  const [root, porcelain, refs] = await Promise.all([
-    git(cwd, ["rev-parse", "--show-toplevel"]),
+  const [porcelain, refs] = await Promise.all([
     git(cwd, ["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all"]),
     git(cwd, ["for-each-ref", "--format=%(objectname) %(refname)"]),
   ]);
-  return { root: root.replace(/\n$/, ""), ...parseStatus(porcelain), refs: createHash("sha1").update(refs).digest("hex") };
+  return { ...parseStatus(porcelain), refs: createHash("sha1").update(refs).digest("hex") };
 }
 
 export async function stage({ cwd, files }: RpcInput<typeof stageRpc>) {

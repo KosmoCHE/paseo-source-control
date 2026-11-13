@@ -1,4 +1,5 @@
-// The Source Control panel: the working tree on top, the commit graph below.
+// The Source Control panel, laid out like VS Code's: the workspace's repositories, the selected
+// repository's working tree, and its commit graph. Each of the three scrolls on its own.
 
 import type { PluginTab, PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
 import { useRpc, useTabState, useWorkspace } from "@getpaseo/plugin/client";
@@ -7,71 +8,112 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { FlatList, Pressable, ScrollView, View } from "react-native";
 import { z } from "zod";
-import { logRpc, scopeSchema, statusRpc } from "../shared/git";
-import type { Commit, Status } from "../shared/git";
+import { logRpc, repositoriesRpc, scopeSchema } from "../shared/git";
+import type { Commit, Repository, Scope, Status } from "../shared/git";
 import { Changes } from "./Changes";
-import { key } from "./git";
+import { key, useStatus } from "./git";
 import { CommitItem, GraphHeader } from "./Graph";
 import { layout as lanes } from "./lanes";
-import { HostProvider, Notice, T, useHost } from "./ui";
+import { Repositories } from "./Repositories";
+import { HintHost, HostProvider, Notice, T, useHost } from "./ui";
 
 const PAGE = 200; // commits read at first, and added by each "Load more"
-const POLL = 3000; // how often the repository is read again, in milliseconds
 const NONE: Commit[] = [];
 
-const viewSchema = z.object({ scope: scopeSchema, folded: z.array(z.string()) });
+const viewSchema = z.object({
+  scope: scopeSchema,
+  folded: z.array(z.string()), // the titles of the folded sections
+  selected: z.string().nullable(), // a repository's root; null: the first one
+  parent: z.boolean(), // the repository above the workspace's folder was asked for
+});
 type ViewState = z.infer<typeof viewSchema>;
-const VIEW: ViewState = { scope: "all", folded: [] };
+const VIEW: ViewState = { scope: "all", folded: [], selected: null, parent: false };
 
 export function Panel({ theme, layout, workspaceId, tab }: PluginWorkspacePanelProps) {
   const directory = useWorkspace(workspaceId, (workspace) => workspace.directory);
   const host = useMemo(() => ({ theme, layout }), [theme, layout]);
   return (
     <HostProvider value={host}>
-      <View style={{ flex: 1, backgroundColor: theme.colors.surface0 }}>
-        {directory === null ? <Notice>This workspace is unavailable.</Notice> : <SourceControl key={directory} directory={directory} workspaceId={workspaceId} tab={tab} />}
-      </View>
+      <HintHost>{directory === null ? <Notice>This workspace is unavailable.</Notice> : <Workspace key={directory} directory={directory} workspaceId={workspaceId} tab={tab} />}</HintHost>
     </HostProvider>
   );
 }
 
-/** Keeps reading the repository the workspace's directory is in; that directory need not be its root. */
-function SourceControl({ directory, workspaceId, tab }: { directory: string; workspaceId: string; tab: PluginTab }) {
-  const read = useRpc(statusRpc);
-  const status = useQuery({ queryKey: key("status", directory), queryFn: () => read({ cwd: directory }), refetchInterval: POLL });
-  if (!status.data) return status.error ? <Notice failed>{status.error.message}</Notice> : <Loading />;
+/** Lists the repositories of the workspace's folder and shows the selected one. */
+function Workspace({ directory, workspaceId, tab }: { directory: string; workspaceId: string; tab: PluginTab }) {
+  const { c } = useHost();
+  const [view, setView] = useTabState(tab, viewSchema, VIEW);
+  const read = useRpc(repositoriesRpc);
+  const found = useQuery({ queryKey: key("repositories", directory), queryFn: () => read({ cwd: directory }), refetchInterval: 10_000 });
+  if (!found.data) return found.error ? <Notice failed>{found.error.message}</Notice> : <Loading />;
+
+  const { parent } = found.data;
+  const list: Repository[] = view.parent && parent ? [...found.data.repositories, parent] : found.data.repositories;
+  if (!list.length)
+    return (
+      <View>
+        <Notice>No git repository in this folder.</Notice>
+        {parent && (
+          <Pressable accessibilityRole="button" onPress={() => setView({ ...view, parent: true })} style={{ paddingHorizontal: 12 }}>
+            <T color={c.accent}>{`Open ${parent.name}, the repository this folder is in`}</T>
+          </Pressable>
+        )}
+      </View>
+    );
+  const selected = list.find((repository) => repository.root === view.selected) ?? list[0];
+  const fold = (title: string) => setView({ ...view, folded: view.folded.includes(title) ? view.folded.filter((name) => name !== title) : [...view.folded, title] });
   return (
-    <View style={{ flex: 1 }}>
-      {status.error && <Notice failed>{status.error.message}</Notice>}
-      <Repository status={status.data} workspaceId={workspaceId} tab={tab} />
-    </View>
+    <>
+      {found.error && <Notice failed>{found.error.message}</Notice>}
+      <ScrollView style={{ flexGrow: 0, maxHeight: "25%" }}>
+        <Repositories list={list} selected={selected} folded={view.folded.includes("Repositories")} onFold={() => fold("Repositories")} onSelect={(root) => setView({ ...view, selected: root })} />
+      </ScrollView>
+      <RepositoryView key={selected.root} cwd={selected.root} workspaceId={workspaceId} folded={view.folded} onFold={fold} scope={view.scope} onScope={(scope) => setView({ ...view, scope })} />
+    </>
   );
 }
 
-function Repository({ status, workspaceId, tab }: { status: Status; workspaceId: string; tab: PluginTab }) {
+interface RepositoryProps {
+  cwd: string; // the repository's root
+  workspaceId: string;
+  folded: string[];
+  onFold: (title: string) => void;
+  scope: Scope;
+  onScope: (scope: Scope) => void;
+}
+
+/** One repository: its working tree, taking what it needs up to a share of the panel, and its history in the rest. */
+function RepositoryView(props: RepositoryProps) {
+  const status = useStatus(props.cwd);
+  if (!status.data) return status.error ? <Notice failed>{status.error.message}</Notice> : <Loading />;
+  return (
+    <>
+      {status.error && <Notice failed>{status.error.message}</Notice>}
+      <ScrollView style={{ flexGrow: 0, maxHeight: "40%" }} keyboardShouldPersistTaps="handled">
+        <Changes cwd={props.cwd} workspaceId={props.workspaceId} status={status.data} folded={props.folded} onFold={props.onFold} />
+      </ScrollView>
+      <History {...props} status={status.data} />
+    </>
+  );
+}
+
+function History({ cwd, workspaceId, scope, onScope, status }: RepositoryProps & { status: Status }) {
   const { c, row } = useHost();
-  const cwd = status.root;
-  const [view, setView] = useTabState(tab, viewSchema, VIEW);
   const [limit, setLimit] = useState(PAGE);
   const [open, setOpen] = useState<string | null>(null); // the commit whose details show
   const read = useRpc(logRpc);
   const history = useQuery({
     // The history is read again whenever HEAD or any ref has moved.
-    queryKey: key("log", cwd, view.scope, limit, status.head, status.branch, status.refs),
-    queryFn: () => read({ cwd, scope: view.scope, limit }),
+    queryKey: key("log", cwd, scope, limit, status.head, status.branch, status.refs),
+    queryFn: () => read({ cwd, scope, limit }),
     enabled: status.head !== null,
     placeholderData: keepPreviousData,
   });
   const commits = history.data?.commits ?? NONE;
   const rails = useMemo(() => lanes(commits), [commits]);
-  const fold = (group: string) => setView({ ...view, folded: view.folded.includes(group) ? view.folded.filter((name) => name !== group) : [...view.folded, group] });
   return (
     <>
-      {/* The two halves scroll on their own, as in VS Code. The working tree takes what it needs, up to half the panel. */}
-      <ScrollView style={{ flexGrow: 0, maxHeight: "50%" }} keyboardShouldPersistTaps="handled">
-        <Changes cwd={cwd} workspaceId={workspaceId} status={status} folded={view.folded} onFold={fold} />
-      </ScrollView>
-      <GraphHeader cwd={cwd} scope={view.scope} onScope={(scope) => setView({ ...view, scope })} />
+      <GraphHeader cwd={cwd} scope={scope} onScope={onScope} />
       <FlatList
         style={{ flex: 1 }}
         data={commits}

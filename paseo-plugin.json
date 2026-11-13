@@ -4,5 +4,12 @@
   "description": "Source control and a commit graph beside every workspace",
   "requirements": {
     "paseo": ">=0.14.0"
-  }
+  },
+  "build": [
+    [
+      "npm",
+      "ci",
+      "--omit=dev"
+    ]
+  ]
 }

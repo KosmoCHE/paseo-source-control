@@ -1,7 +1,7 @@
 // The contract between the panel and the daemon half, which runs git.
 //
-// `git.status` takes any directory inside a repository and reports the repository's root.
-// Git names files relative to that root, so every other call takes the root as its `cwd`.
+// `git.repositories` takes a workspace's folder and lists the repositories in it. Git names
+// files relative to a repository's root, so every other call takes such a root as its `cwd`.
 
 import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
@@ -32,11 +32,27 @@ export const commitSchema = z.object({
 });
 export type Commit = z.infer<typeof commitSchema>;
 
+export const repositorySchema = z.object({
+  root: z.string(),
+  name: z.string(),
+  branch: z.string().nullable(), // null when HEAD is detached
+});
+export type Repository = z.infer<typeof repositorySchema>;
+
+/** The repositories VS Code would list for the folder, opened as a workspace. */
+export const repositoriesRpc = defineRpc({
+  name: "git.repositories",
+  input: z.object({ cwd: z.string() }),
+  output: z.object({
+    repositories: z.array(repositorySchema),
+    parent: repositorySchema.nullable(), // a repository whose root lies above the folder: offered, not listed
+  }),
+});
+
 export const statusRpc = defineRpc({
   name: "git.status",
   input: z.object({ cwd: z.string() }),
   output: z.object({
-    root: z.string(), // the repository's top directory; the paths below are relative to it
     branch: z.string().nullable(), // null when HEAD is detached
     head: hash.nullable(), // null before the first commit
     upstream: z.string().nullable(),

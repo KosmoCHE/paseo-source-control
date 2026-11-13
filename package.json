@@ -32,5 +32,8 @@
     "react-native-web": "^0.21.4",
     "typescript": "^5.9.3",
     "zod": "^4.4.3"
+  },
+  "dependencies": {
+    "strip-json-comments": "^5.0.3"
   }
 }
