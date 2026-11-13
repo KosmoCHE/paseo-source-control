@@ -71,7 +71,7 @@ test/              node:test suites for the git reader, the repository search, t
 preview/           the panel in a browser, for development
 ```
 
-A plugin has no SVG, so the graph is built from plain views: a lane is a thin box, and a turn into or out of a commit's dot is a box with two borders and one rounded corner.
+A plugin's client cannot import an SVG library, and inline SVG is accepted for icons only, so the graph is built from plain views: a lane is a thin box, and a turn into or out of a commit's dot is a box with two borders and one rounded corner.
 
 ## Development
 

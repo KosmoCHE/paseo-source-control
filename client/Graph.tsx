@@ -1,6 +1,6 @@
 // The commit graph: one row per commit, its lanes drawn on the left.
 //
-// There is no SVG in a plugin, so a row's rail is built from plain views: a lane is a thin
+// A plugin cannot import an SVG library (inline SVG is for icons only), so a row's rail is built from plain views: a lane is a thin
 // box, and a turn into or out of the dot is a box with two borders and one rounded corner.
 // Rows are a fixed height, which is what lets the lanes of neighbouring rows meet.
 
