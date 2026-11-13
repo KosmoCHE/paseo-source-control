@@ -8,7 +8,7 @@ import type { ZodType, input as ZodInput } from "zod";
 import { statusRpc } from "../shared/git";
 
 /** Every query of the plugin shares this prefix, so one invalidation reads everything again. */
-export const key = (...parts: unknown[]) => ["git-graph", ...parts];
+export const key = (...parts: unknown[]) => ["source-control", ...parts];
 
 /** A repository's working tree, read again every few seconds. Everything showing one repository shares the reading. */
 export function useStatus(cwd: string) {

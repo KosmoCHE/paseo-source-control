@@ -19,7 +19,7 @@ Object.assign(process.env, {
 const { commit, diff, discard, log, show, stage, status, unstage } = await import("../server/git.ts");
 
 function repository(t: TestContext) {
-  const cwd = mkdtempSync(join(tmpdir(), "git-graph-"));
+  const cwd = mkdtempSync(join(tmpdir(), "source-control-"));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   const git = (...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
   const write = (path: string, text: string) => writeFileSync(join(cwd, path), text);

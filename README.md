@@ -1,4 +1,4 @@
-# Git Graph for Paseo
+# Source Control for Paseo
 
 A [Paseo](https://paseo.sh) plugin that adds a Source Control panel to every workspace, modelled on the one in VS Code: the workspace's repositories, the selected repository's working tree, and its commit graph. Each scrolls on its own, the lines between them drag to resize them, and the repository list and the graph fold from their title bars.
 
@@ -38,8 +38,8 @@ VS Code's user-level settings are not read, and submodules and worktrees are not
 ## Install from a checkout
 
 ```bash
-git clone https://github.com/KosmoCHE/paseo-plugin-git-graph.git
-cd paseo-plugin-git-graph
+git clone https://github.com/KosmoCHE/paseo-source-control.git
+cd paseo-source-control
 npm install
 paseo plugin install "$(pwd)"
 ```
@@ -48,7 +48,7 @@ Open a workspace: **Source Control** is available as an explorer tab and as a wo
 
 The daemon half has one runtime dependency, `strip-json-comments`; the manifest's `build` step installs it when Paseo installs the plugin from Git.
 
-After changing the code, `paseo plugin reload git-graph` compiles it again. `paseo plugin ls git-graph --json` shows a compile error, `paseo plugin logs git-graph` the daemon half's output.
+After changing the code, `paseo plugin reload source-control` compiles it again. `paseo plugin ls source-control --json` shows a compile error, `paseo plugin logs source-control` the daemon half's output.
 
 ## Layout
 

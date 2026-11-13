@@ -12,7 +12,7 @@ const { repositories } = await import("../server/repositories.ts");
 
 /** A temporary folder. `repo` makes a repository below it, `settings` writes its .vscode/settings.json. */
 function workspace(t: TestContext) {
-  const top = realpathSync(mkdtempSync(join(tmpdir(), "git-graph-")));
+  const top = realpathSync(mkdtempSync(join(tmpdir(), "source-control-")));
   t.after(() => rmSync(top, { recursive: true, force: true }));
   const at = (path: string) => join(top, path);
   const folder = (path: string) => mkdirSync(at(path), { recursive: true });
