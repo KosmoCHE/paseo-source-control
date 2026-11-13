@@ -1,20 +1,22 @@
 // The Source Control panel, laid out like VS Code's: the workspace's repositories, the selected
-// repository's working tree, and its commit graph. Each of the three scrolls on its own.
+// repository's working tree, and its commit graph. Each of the three scrolls on its own, and
+// the lines between them drag.
 
 import type { PluginTab, PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
 import { useRpc, useTabState, useWorkspace } from "@getpaseo/plugin/client";
 import { Loading } from "@getpaseo/plugin/client/ui";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
-import { FlatList, Pressable, ScrollView, View } from "react-native";
+import { FlatList, Pressable, View } from "react-native";
 import { z } from "zod";
 import { logRpc, repositoriesRpc, scopeSchema } from "../shared/git";
-import type { Commit, Repository, Scope, Status } from "../shared/git";
+import type { Commit, Repository, Scope } from "../shared/git";
 import { Changes } from "./Changes";
 import { key, useStatus } from "./git";
 import { CommitItem, GraphHeader } from "./Graph";
 import { layout as lanes } from "./lanes";
 import { Repositories } from "./Repositories";
+import { Split, sizesSchema } from "./Split";
 import { HintHost, HostProvider, Notice, T, useHost } from "./ui";
 
 const PAGE = 200; // commits read at first, and added by each "Load more"
@@ -25,9 +27,10 @@ const viewSchema = z.object({
   folded: z.array(z.string()), // the titles of the folded sections
   selected: z.string().nullable(), // a repository's root; null: the first one
   parent: z.boolean(), // the repository above the workspace's folder was asked for
+  sizes: sizesSchema,
 });
 type ViewState = z.infer<typeof viewSchema>;
-const VIEW: ViewState = { scope: "all", folded: [], selected: null, parent: false };
+const VIEW: ViewState = { scope: "all", folded: [], selected: null, parent: false, sizes: { repositories: null, changes: null } };
 
 export function Panel({ theme, layout, workspaceId, tab }: PluginWorkspacePanelProps) {
   const directory = useWorkspace(workspaceId, (workspace) => workspace.directory);
@@ -61,56 +64,53 @@ function Workspace({ directory, workspaceId, tab }: { directory: string; workspa
       </View>
     );
   const selected = list.find((repository) => repository.root === view.selected) ?? list[0];
+  const cwd = selected.root;
   const fold = (title: string) => setView({ ...view, folded: view.folded.includes(title) ? view.folded.filter((name) => name !== title) : [...view.folded, title] });
+  const folded = view.folded.includes("Repositories");
   return (
     <>
       {found.error && <Notice failed>{found.error.message}</Notice>}
-      <ScrollView style={{ flexGrow: 0, maxHeight: "25%" }}>
-        <Repositories list={list} selected={selected} folded={view.folded.includes("Repositories")} onFold={() => fold("Repositories")} onSelect={(root) => setView({ ...view, selected: root })} />
-      </ScrollView>
-      <RepositoryView key={selected.root} cwd={selected.root} workspaceId={workspaceId} folded={view.folded} onFold={fold} scope={view.scope} onScope={(scope) => setView({ ...view, scope })} />
+      <Split
+        sizes={view.sizes}
+        onSizes={(sizes) => setView({ ...view, sizes })}
+        folded={folded}
+        repositories={<Repositories list={list} selected={selected} folded={folded} onFold={() => fold("Repositories")} onSelect={(root) => setView({ ...view, selected: root })} />}
+        changes={<WorkingTree key={cwd} cwd={cwd} workspaceId={workspaceId} folded={view.folded} onFold={fold} />}
+        graph={<History key={cwd} cwd={cwd} workspaceId={workspaceId} scope={view.scope} onScope={(scope) => setView({ ...view, scope })} />}
+      />
     </>
   );
 }
 
-interface RepositoryProps {
-  cwd: string; // the repository's root
-  workspaceId: string;
-  folded: string[];
-  onFold: (title: string) => void;
-  scope: Scope;
-  onScope: (scope: Scope) => void;
-}
-
-/** One repository: its working tree, taking what it needs up to a share of the panel, and its history in the rest. */
-function RepositoryView(props: RepositoryProps) {
-  const status = useStatus(props.cwd);
+/** The selected repository's working tree. It also speaks for the repository while it loads or fails. */
+function WorkingTree({ cwd, workspaceId, folded, onFold }: { cwd: string; workspaceId: string; folded: string[]; onFold: (title: string) => void }) {
+  const status = useStatus(cwd);
   if (!status.data) return status.error ? <Notice failed>{status.error.message}</Notice> : <Loading />;
   return (
     <>
       {status.error && <Notice failed>{status.error.message}</Notice>}
-      <ScrollView style={{ flexGrow: 0, maxHeight: "40%" }} keyboardShouldPersistTaps="handled">
-        <Changes cwd={props.cwd} workspaceId={props.workspaceId} status={status.data} folded={props.folded} onFold={props.onFold} />
-      </ScrollView>
-      <History {...props} status={status.data} />
+      <Changes cwd={cwd} workspaceId={workspaceId} status={status.data} folded={folded} onFold={onFold} />
     </>
   );
 }
 
-function History({ cwd, workspaceId, scope, onScope, status }: RepositoryProps & { status: Status }) {
+/** The selected repository's commit graph. */
+function History({ cwd, workspaceId, scope, onScope }: { cwd: string; workspaceId: string; scope: Scope; onScope: (scope: Scope) => void }) {
   const { c, row } = useHost();
   const [limit, setLimit] = useState(PAGE);
   const [open, setOpen] = useState<string | null>(null); // the commit whose details show
+  const status = useStatus(cwd).data;
   const read = useRpc(logRpc);
   const history = useQuery({
     // The history is read again whenever HEAD or any ref has moved.
-    queryKey: key("log", cwd, scope, limit, status.head, status.branch, status.refs),
+    queryKey: key("log", cwd, scope, limit, status?.head, status?.branch, status?.refs),
     queryFn: () => read({ cwd, scope, limit }),
-    enabled: status.head !== null,
+    enabled: Boolean(status?.head),
     placeholderData: keepPreviousData,
   });
   const commits = history.data?.commits ?? NONE;
   const rails = useMemo(() => lanes(commits), [commits]);
+  if (!status) return null;
   return (
     <>
       <GraphHeader cwd={cwd} scope={scope} onScope={onScope} />

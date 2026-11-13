@@ -1,6 +1,6 @@
 # Git Graph for Paseo
 
-A [Paseo](https://paseo.sh) plugin that adds a Source Control panel to every workspace, modelled on the one in VS Code: the workspace's repositories, the selected repository's working tree, and its commit graph, each scrolling on its own.
+A [Paseo](https://paseo.sh) plugin that adds a Source Control panel to every workspace, modelled on the one in VS Code: the workspace's repositories, the selected repository's working tree, and its commit graph. Each scrolls on its own, and the lines between them drag to resize them.
 
 - **Repositories**: the repositories VS Code would list for the workspace's folder. Selecting one shows it in the rest of the panel.
 - **Changes**: commit message, Commit and Amend buttons, staged files, changed files, files in conflict. Stage, unstage and discard per file; stage or unstage everything from the group's title. Amend folds what is staged into the last commit, and rewords it when a message is written.
@@ -59,6 +59,7 @@ shared/git.ts      the RPC contracts
 server/git.ts      runs git and reads its output
 server/repositories.ts  finds the workspace's repositories
 client/Repositories.tsx the repository list
+client/Split.tsx        the three sections and the lines that resize them
 client/lanes.ts    gives every commit a lane
 client/Graph.tsx   draws the graph rows
 client/Changes.tsx the working tree part

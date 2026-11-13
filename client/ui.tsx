@@ -19,7 +19,7 @@ export function useHost() {
   const host = useContext(HostContext);
   if (!host) throw new Error("useHost needs a HostProvider above it");
   const { compact, platform } = host.layout;
-  return { c: host.theme.colors, compact, mono: MONO[platform], text: compact ? 15 : 13, small: compact ? 12 : 11, row: compact ? 34 : 24 };
+  return { c: host.theme.colors, compact, platform, mono: MONO[platform], text: compact ? 15 : 13, small: compact ? 12 : 11, row: compact ? 34 : 24 };
 }
 
 interface TProps {

@@ -1,8 +1,9 @@
 // The browser preview: the Source Control panel as a sidebar, the diff tab beside it.
 //
 // Address parameters: cwd (the repository), theme=light, compact, width (of the sidebar),
-// press, a "|"-separated list of button names to click in turn once they appear, and hover,
-// one button to rest the pointer on after that: how a screenshot reaches a state behind them.
+// and three that act once what they name appears, which is how a screenshot reaches a state
+// behind them: press, a "|"-separated list of buttons to click in turn; drag, a divider and
+// how far down to pull it ("Resize Changes:120"); hover, a button to rest the pointer on.
 
 import type { PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -71,12 +72,29 @@ function button(name: string) {
   return (named.find((candidate) => candidate.name === name) ?? named.find((candidate) => candidate.name.startsWith(name)))?.element;
 }
 
-const presses = (params.get("press") ?? "").split("|").filter(Boolean);
-const hover = params.get("hover");
-const timer = setInterval(() => {
-  const target = button(presses[0] ?? hover ?? "");
-  if (!target) return void (presses.length || hover || clearInterval(timer));
-  if (presses.shift()) return target.click();
-  target.dispatchEvent(new PointerEvent("pointerenter", { pointerType: "mouse" }));
-  clearInterval(timer);
-}, 100);
+const wait = (ms: number) => new Promise((done) => setTimeout(done, ms));
+async function found(name: string) {
+  for (;;) {
+    const element = button(name);
+    if (element) return element;
+    await wait(100);
+  }
+}
+
+void (async () => {
+  for (const name of (params.get("press") ?? "").split("|").filter(Boolean)) (await found(name)).click();
+  const [line, by] = (params.get("drag") ?? "").split(":");
+  if (line) {
+    const element = await found(line);
+    const box = element.getBoundingClientRect();
+    const at = (dy: number) => ({ bubbles: true, button: 0, clientX: box.left + box.width / 2, clientY: box.top + box.height / 2 + dy });
+    element.dispatchEvent(new MouseEvent("mousedown", at(0)));
+    for (let step = 1; step <= 4; step++) {
+      element.dispatchEvent(new MouseEvent("mousemove", at((Number(by) * step) / 4)));
+      await wait(30);
+    }
+    element.dispatchEvent(new MouseEvent("mouseup", at(Number(by))));
+  }
+  const hover = params.get("hover");
+  if (hover) (await found(hover)).dispatchEvent(new PointerEvent("pointerenter", { pointerType: "mouse" }));
+})();

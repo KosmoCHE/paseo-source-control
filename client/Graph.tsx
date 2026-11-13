@@ -225,7 +225,7 @@ export function GraphHeader({ cwd, scope, onScope }: { cwd: string; scope: Scope
   const run = (action: "fetch" | "pull" | "push", done: string) => sync.mutate({ action }, { onSuccess: () => toast.show(done, { variant: "success" }) });
   const scopeHint = useHint(scope === "all" ? "All branches are shown. Show only the current branch and its upstream" : "The current branch and its upstream are shown. Show all branches");
   return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 4, height: row + 6, paddingHorizontal: 8, borderTopWidth: 1, borderColor: c.border }}>
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 4, height: row + 6, paddingHorizontal: 8 }}>
       <T size={small} weight="600" color={c.foregroundMuted} style={{ flex: 1, textTransform: "uppercase" }}>
         Graph
       </T>
