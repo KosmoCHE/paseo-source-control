@@ -11,7 +11,7 @@ import { Pressable, View } from "react-native";
 import type { ViewStyle } from "react-native";
 import { showRpc, syncRpc } from "../shared/git";
 import type { Commit, Ref, Scope } from "../shared/git";
-import { branch } from "./codicons";
+import * as codicon from "./codicons";
 import { showDiff } from "./diffTab";
 import { FileTree } from "./Files";
 import { key, useCommand } from "./git";
@@ -98,7 +98,7 @@ function Rails({ rail, height, kind }: { rail: Rail; height: number; kind: "comm
 function Badges({ refs }: { refs: Ref[] }) {
   const { c, small } = useHost();
   const local = new Set(refs.filter((ref) => ref.kind !== "remote" && ref.kind !== "tag").map((ref) => ref.name));
-  const icon = { head: "Target", branch, remote: "Cloud", tag: "Tag" };
+  const icon = { head: codicon.target, branch: codicon.gitBranch, remote: codicon.cloud, tag: codicon.tag };
   return (
     <View style={{ flexDirection: "row", flexShrink: 0, maxWidth: "55%", gap: 4, marginLeft: 6, overflow: "hidden" }}>
       {refs.map((ref) => {
@@ -188,7 +188,7 @@ function Details({ cwd, workspaceId, commit, rail }: Pick<ItemProps, "cwd" | "wo
           <T mono size={small} color={c.foregroundMuted}>
             {commit.hash.slice(0, 10)}
           </T>
-          <IconButton name="Copy" label="Copy commit hash" onPress={copy} />
+          <IconButton icon={codicon.copy} label="Copy commit hash" onPress={copy} />
           <T size={small} color={c.foregroundMuted} lines={1} style={{ flex: 1, minWidth: 0, textAlign: "right" }}>
             {`${commit.author} · ${new Date(commit.time * 1000).toLocaleString()}`}
           </T>
@@ -231,15 +231,15 @@ export function GraphHeader({ cwd, scope, onScope }: { cwd: string; scope: Scope
         onPress={() => onScope(scope === "all" ? "current" : "all")}
         style={{ flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 4 }}
       >
-        <Icon icon={branch} size={small + 2} color={c.foregroundMuted} />
+        <Icon icon={codicon.gitBranch} size={small + 3} color={c.foregroundMuted} />
         <T size={small} color={c.foregroundMuted}>
           {scope === "all" ? "All" : "Auto"}
         </T>
       </Pressable>
-      <IconButton name="CloudDownload" label="Fetch" disabled={sync.isPending} onPress={() => run("fetch", "Fetched")} />
-      <IconButton name="ArrowDownToLine" label="Pull" disabled={sync.isPending} onPress={() => run("pull", "Pulled")} />
-      <IconButton name="ArrowUpFromLine" label="Push" disabled={sync.isPending} onPress={() => run("push", "Pushed")} />
-      <IconButton name="RefreshCw" label="Refresh" onPress={() => void queries.invalidateQueries({ queryKey: key() })} />
+      <IconButton icon={codicon.gitFetch} label="Fetch" disabled={sync.isPending} onPress={() => run("fetch", "Fetched")} />
+      <IconButton icon={codicon.repoPull} label="Pull" disabled={sync.isPending} onPress={() => run("pull", "Pulled")} />
+      <IconButton icon={codicon.repoPush} label="Push" disabled={sync.isPending} onPress={() => run("push", "Pushed")} />
+      <IconButton icon={codicon.refresh} label="Refresh" onPress={() => void queries.invalidateQueries({ queryKey: key() })} />
     </View>
   );
 }

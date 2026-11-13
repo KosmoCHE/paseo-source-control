@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 import { Pressable, TextInput, View } from "react-native";
 import { commitRpc, discardRpc, stageRpc, unstageRpc } from "../shared/git";
 import type { DiffSource, FileChange, Status } from "../shared/git";
+import * as codicon from "./codicons";
 import { showDiff } from "./diffTab";
 import { FileTree } from "./Files";
 import { useCommand } from "./git";
@@ -96,26 +97,26 @@ export function Changes({ cwd, workspaceId, status, folded, onFold }: Props) {
         />
       </View>
       {group("Merge Changes", status.conflicts, { kind: "changes" }, null, (files, path) => (
-        <IconButton name="Plus" label={`Mark ${path} as resolved`} hint="Mark as resolved" onPress={() => stage.mutate({ files })} />
+        <IconButton icon={codicon.add} label={`Mark ${path} as resolved`} hint="Mark as resolved" onPress={() => stage.mutate({ files })} />
       ))}
       {group(
         "Staged Changes",
         status.staged,
         { kind: "staged" },
-        <IconButton name="Minus" label="Unstage all changes" onPress={() => unstage.mutate({ files: status.staged })} />,
+        <IconButton icon={codicon.remove} label="Unstage all changes" onPress={() => unstage.mutate({ files: status.staged })} />,
         (files, path) => (
-          <IconButton name="Minus" label={`Unstage ${path}`} hint="Unstage changes" onPress={() => unstage.mutate({ files })} />
+          <IconButton icon={codicon.remove} label={`Unstage ${path}`} hint="Unstage changes" onPress={() => unstage.mutate({ files })} />
         ),
       )}
       {group(
         "Changes",
         status.changes,
         { kind: "changes" },
-        <IconButton name="Plus" label="Stage all changes" onPress={() => stage.mutate({ files: status.changes })} />,
+        <IconButton icon={codicon.add} label="Stage all changes" onPress={() => stage.mutate({ files: status.changes })} />,
         (files, path) => (
           <>
-            <IconButton name="Undo2" label={`Discard changes in ${path}`} hint="Discard changes" onPress={() => drop(files, path)} />
-            <IconButton name="Plus" label={`Stage ${path}`} hint="Stage changes" onPress={() => stage.mutate({ files })} />
+            <IconButton icon={codicon.discard} label={`Discard changes in ${path}`} hint="Discard changes" onPress={() => drop(files, path)} />
+            <IconButton icon={codicon.add} label={`Stage ${path}`} hint="Stage changes" onPress={() => stage.mutate({ files })} />
           </>
         ),
       )}
@@ -158,7 +159,7 @@ function CommitButton({ enabled, onCommit, more }: { enabled: boolean; onCommit:
         onPress={enabled ? onCommit : undefined} // not the disabled prop: that would switch off hovering, and the hint with it
         style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 6, opacity: enabled ? 1 : 0.5 }}
       >
-        <Icon name="Check" size={text + 1} color={c.accentForeground} />
+        <Icon icon={codicon.check} size={text + 3} color={c.accentForeground} />
         <T weight="600" color={c.accentForeground}>
           Commit
         </T>
@@ -171,7 +172,7 @@ function CommitButton({ enabled, onCommit, more }: { enabled: boolean; onCommit:
         onPress={() => arrow.ref.current && menu(arrow.ref.current, more)}
         style={{ justifyContent: "center", paddingHorizontal: 8 }}
       >
-        <Icon name="ChevronDown" size={text + 1} color={c.accentForeground} />
+        <Icon icon={codicon.chevronDown} size={text + 3} color={c.accentForeground} />
       </Pressable>
     </View>
   );

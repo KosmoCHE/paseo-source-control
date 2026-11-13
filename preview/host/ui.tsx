@@ -1,16 +1,12 @@
 // Stands in for @getpaseo/plugin/client/ui in the browser preview. Rough on purpose:
 // these are the host's pieces, and only their place in the layout matters here.
 
-import { icons } from "lucide-react";
 import type { ReactNode } from "react";
 import { Text, View } from "react-native";
 
-export function Icon({ name, icon = name, size = 24, color }: { name?: string; icon?: string | { svg: string }; size?: number; color?: string }) {
-  // Inline SVG: the host draws it at the size asked for, in the colour asked for.
-  if (typeof icon === "object") return <span style={{ display: "flex", color }} dangerouslySetInnerHTML={{ __html: icon.svg.replace('width="16" height="16"', `width="${size}" height="${size}"`) }} />;
-  const Glyph = icons[icon as keyof typeof icons];
-  if (!Glyph) throw new Error(`Unknown Lucide icon: ${icon}`); // the real host draws nothing; here a typo should be loud
-  return <Glyph size={size} color={color} />;
+/** The panel only uses inline SVG. The host draws it at the size asked for, in the colour asked for. */
+export function Icon({ icon, size = 24, color }: { icon: { svg: string }; size?: number; color?: string }) {
+  return <span style={{ display: "flex", color }} dangerouslySetInnerHTML={{ __html: icon.svg.replace('width="16" height="16"', `width="${size}" height="${size}"`) }} />;
 }
 
 export function Loading() {

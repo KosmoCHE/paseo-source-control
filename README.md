@@ -84,7 +84,7 @@ npm run preview    # then open http://127.0.0.1:4173/?cwd=/path/to/a/repository
 
 The preview renders the real panel under React Native Web with stand-ins for the Paseo host, and answers its RPCs with the plugin's own daemon half, so the buttons act on the repository you point it at. Address parameters: `theme=light`, `compact`, `width=<sidebar width>`, and `press=<button name>|<button name>` to click through to a state.
 
-The branch and repository icons are VS Code's own, from [vscode-codicons](https://github.com/microsoft/vscode-codicons) (CC BY 4.0); the rest are Paseo's Lucide icons.
+The panel's icons are VS Code's own, from [vscode-codicons](https://github.com/microsoft/vscode-codicons) (CC BY 4.0). Only the icons of the two tabs, which sit among Paseo's own, are Lucide's.
 
 ## Limits
 

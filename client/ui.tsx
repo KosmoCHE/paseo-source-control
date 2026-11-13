@@ -6,6 +6,8 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState } from 
 import type { ReactNode } from "react";
 import { Pressable, Text, View } from "react-native";
 import type { StyleProp, TextStyle } from "react-native";
+import * as codicon from "./codicons";
+import type { Codicon } from "./codicons";
 
 type Host = Pick<PluginHostProps, "theme" | "layout">;
 const HostContext = createContext<Host | null>(null);
@@ -170,7 +172,7 @@ export function useMenu() {
 }
 
 /** `hint` is what hovering shows; it is the label unless the label names a file. */
-export function IconButton({ name, label, hint, onPress, disabled }: { name: string; label: string; hint?: string; onPress: () => void; disabled?: boolean }) {
+export function IconButton({ icon, label, hint, onPress, disabled }: { icon: Codicon; label: string; hint?: string; onPress: () => void; disabled?: boolean }) {
   const { c, compact } = useHost();
   return (
     <Pressable
@@ -182,7 +184,7 @@ export function IconButton({ name, label, hint, onPress, disabled }: { name: str
       onPress={disabled ? undefined : onPress} // not the disabled prop: that would switch off hovering, and the hint with it
       style={({ pressed }) => ({ padding: compact ? 6 : 3, borderRadius: 4, opacity: disabled ? 0.4 : pressed ? 0.6 : 1 })}
     >
-      <Icon name={name} size={compact ? 18 : 15} color={c.foregroundMuted} />
+      <Icon icon={icon} size={compact ? 18 : 16} color={c.foregroundMuted} />
     </Pressable>
   );
 }
@@ -192,7 +194,7 @@ export function Heading({ title, folded, onFold, count, children }: { title: str
   const { c, row, small } = useHost();
   return (
     <Pressable accessibilityRole="button" accessibilityLabel={title} accessibilityState={{ expanded: !folded }} onPress={onFold} style={{ flexDirection: "row", alignItems: "center", gap: 4, height: row, paddingHorizontal: 8 }}>
-      <Icon name={folded ? "ChevronRight" : "ChevronDown"} size={small + 3} color={c.foregroundMuted} />
+      <Icon icon={folded ? codicon.chevronRight : codicon.chevronDown} size={small + 5} color={c.foregroundMuted} />
       <T size={small} weight="600" color={c.foregroundMuted} lines={1} style={{ flex: 1, minWidth: 0, textTransform: "uppercase" }}>
         {title}
       </T>

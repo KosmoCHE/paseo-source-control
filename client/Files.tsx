@@ -6,6 +6,7 @@ import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Pressable, View } from "react-native";
 import type { FileChange } from "../shared/git";
+import * as codicon from "./codicons";
 import { everyFile, fileName, tree } from "./tree";
 import type { Folder } from "./tree";
 import { T, useHost } from "./ui";
@@ -49,8 +50,8 @@ export function FileTree({ files, indent, onOpen, actions }: Props) {
           onPress={() => setFolded(shut ? folded.filter((path) => path !== child.path) : [...folded, child.path])}
           style={[line, { paddingLeft: indent + depth * STEP }]}
         >
-          <Icon name={shut ? "ChevronRight" : "ChevronDown"} size={small + 3} color={c.foregroundMuted} />
-          <Icon name={shut ? "Folder" : "FolderOpen"} size={small + 3} color={c.foregroundMuted} />
+          <Icon icon={shut ? codicon.chevronRight : codicon.chevronDown} size={small + 5} color={c.foregroundMuted} />
+          <Icon icon={shut ? codicon.folder : codicon.folderOpened} size={small + 5} color={c.foregroundMuted} />
           <T lines={1} style={{ flex: 1, minWidth: 0 }}>
             {child.name.replaceAll("/", " / ")}
           </T>
@@ -72,9 +73,9 @@ export function FileTree({ files, indent, onOpen, actions }: Props) {
           accessibilityLabel={`${file.path}, ${letter}`}
           onPress={() => onOpen(file)}
           // A file lines up with the names of the folders beside it, past their chevrons.
-          style={[line, { paddingLeft: indent + depth * STEP + small + 3 + line.gap }]}
+          style={[line, { paddingLeft: indent + depth * STEP + small + 5 + line.gap }]}
         >
-          <Icon name="File" size={small + 3} color={c.foregroundMuted} />
+          <Icon icon={codicon.file} size={small + 5} color={c.foregroundMuted} />
           <T lines={1} style={[{ flexShrink: 1, minWidth: 0 }, file.status === "D" && { textDecorationLine: "line-through" }]}>
             {fileName(file)}
           </T>
