@@ -86,9 +86,23 @@ export async function repositories({ cwd }: RpcInput<typeof repositoriesRpc>): P
   for (const path of settings["git.ignoredRepositories"]) roots.delete(resolve(folder, path));
 
   const describe = async (root: string) => {
-    // Only the lines about the branch are wanted, so the untracked files are not looked for.
-    const { branch, upstream, ahead, behind } = parseStatus(await git(root, ["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=no"]));
-    return { root, name: basename(root), branch, upstream, ahead, behind };
+    // An untracked file is a change, as it is to VS Code. Only whether there is one matters, so an
+    // untracked folder is not looked into.
+    const status = parseStatus(await git(root, ["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=normal"]));
+    // Where VS Code looks for a merge or a rebase under way.
+    const left = (name: string) => existsSync(join(root, ".git", name));
+    return {
+      root,
+      name: basename(root),
+      branch: status.branch,
+      head: status.head,
+      upstream: status.upstream,
+      ahead: status.ahead,
+      behind: status.behind,
+      changed: status.changes.length > 0,
+      staged: status.staged.length > 0,
+      merging: left("MERGE_HEAD") || ((left("rebase-apply") || left("rebase-merge")) && left("REBASE_HEAD")),
+    };
   };
   const inside = (root: string) => root === folder || root.startsWith(folder + sep);
   const parents = settings["git.openRepositoryInParentFolders"];

@@ -36,9 +36,14 @@ export const repositorySchema = z.object({
   root: z.string(),
   name: z.string(),
   branch: z.string().nullable(), // null when HEAD is detached
+  head: z.string().nullable(), // the checked-out commit; null before the first one
   upstream: z.string().nullable(), // the branch it follows on a remote, if any
   ahead: z.number(), // commits the upstream lacks, and
   behind: z.number(), // commits only the upstream has, as of the last fetch
+  // What VS Code marks beside the branch: changed or untracked files, staged ones, a merge or rebase under way.
+  changed: z.boolean(),
+  staged: z.boolean(),
+  merging: z.boolean(),
 });
 export type Repository = z.infer<typeof repositorySchema>;
 

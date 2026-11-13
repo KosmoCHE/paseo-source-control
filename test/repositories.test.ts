@@ -44,7 +44,8 @@ test("the folder's own repository and those one level down", async (t) => {
   assert.deepEqual(await list("."), { listed: [".", "a", "b"], offered: null });
 
   const [own] = (await repositories({ cwd: top })).repositories;
-  assert.deepEqual(own, { root: top, name: top.slice(dirname(top).length + 1), branch: "main", upstream: null, ahead: 0, behind: 0 });
+  // The repositories below are untracked folders to this one, and so changes.
+  assert.deepEqual(own, { root: top, name: top.slice(dirname(top).length + 1), branch: "main", head: null, upstream: null, ahead: 0, behind: 0, changed: true, staged: false, merging: false });
 });
 
 test("a folder inside a repository lists what is below it, and only offers the repository above", async (t) => {
@@ -103,7 +104,9 @@ test("a detached HEAD has no branch", async (t) => {
   const git = (...args: string[]) => execFileSync("git", ["-c", "user.name=Ada", "-c", "user.email=ada@example.com", ...args], { cwd: at(".") });
   git("commit", "--quiet", "--allow-empty", "--message=first");
   git("switch", "--quiet", "--detach");
-  assert.equal((await repositories({ cwd: top })).repositories[0].branch, null);
+  const [detached] = (await repositories({ cwd: top })).repositories;
+  assert.equal(detached.branch, null);
+  assert.equal(detached.head, git("rev-parse", "HEAD").toString().trim());
 });
 
 test("how far a branch is from its upstream", async (t) => {
@@ -117,10 +120,40 @@ test("how far a branch is from its upstream", async (t) => {
   commit("origin", "theirs too");
   commit("clone", "mine");
 
-  const read = async () => (await repositories({ cwd: top })).repositories.find((repository) => repository.name === "clone");
-  assert.deepEqual(await read(), { root: at("clone"), name: "clone", branch: "main", upstream: "origin/main", ahead: 1, behind: 0 }); // what the upstream has gained is not known before a fetch
+  const read = async () => {
+    const { upstream, ahead, behind } = (await repositories({ cwd: top })).repositories.find((repository) => repository.name === "clone")!;
+    return { upstream, ahead, behind };
+  };
+  assert.deepEqual(await read(), { upstream: "origin/main", ahead: 1, behind: 0 }); // what the upstream has gained is not known before a fetch
   git("clone", "fetch", "--quiet");
-  assert.deepEqual(await read(), { root: at("clone"), name: "clone", branch: "main", upstream: "origin/main", ahead: 1, behind: 2 });
+  assert.deepEqual(await read(), { upstream: "origin/main", ahead: 1, behind: 2 });
+});
+
+test("what is pending, as VS Code marks it beside the branch", async (t) => {
+  const { repo, at, top } = workspace(t);
+  repo(".");
+  const git = (...args: string[]) => execFileSync("git", ["-c", "user.name=Ada", "-c", "user.email=ada@example.com", ...args], { cwd: top, stdio: "pipe" });
+  const read = async () => {
+    const { changed, staged, merging } = (await repositories({ cwd: top })).repositories[0];
+    return { changed, staged, merging };
+  };
+  writeFileSync(at("file.txt"), "first\n");
+  assert.deepEqual(await read(), { changed: true, staged: false, merging: false }); // untracked
+  git("add", "file.txt");
+  assert.deepEqual(await read(), { changed: false, staged: true, merging: false });
+  git("commit", "--quiet", "--message=first");
+  assert.deepEqual(await read(), { changed: false, staged: false, merging: false });
+
+  git("switch", "--quiet", "--create", "other");
+  writeFileSync(at("file.txt"), "theirs\n");
+  git("commit", "--quiet", "--all", "--message=theirs");
+  git("switch", "--quiet", "main");
+  writeFileSync(at("file.txt"), "ours\n");
+  git("commit", "--quiet", "--all", "--message=ours");
+  assert.throws(() => git("merge", "other")); // a conflict
+  assert.deepEqual(await read(), { changed: false, staged: false, merging: true }); // the file in conflict is neither changed nor staged
+  git("merge", "--abort");
+  assert.deepEqual(await read(), { changed: false, staged: false, merging: false });
 });
 
 test("a settings file that cannot be used is reported", async (t) => {

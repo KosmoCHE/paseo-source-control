@@ -1,6 +1,6 @@
 Git Graph adds a Source Control panel to every workspace, modelled on the one in VS Code: the workspace's repositories, the selected repository's working tree, and its commit graph.
 
-The repositories are the ones VS Code would list for the workspace's folder: its own, and those one level down. Each shows its branch and, when it differs from its upstream, the commits to pull and to push. The folder's `.vscode/settings.json` is honoured for `git.scanRepositories`, `git.repositoryScanMaxDepth`, `git.autoRepositoryDetection`, `git.repositoryScanIgnoredFolders`, `git.ignoredRepositories` and `git.openRepositoryInParentFolders`.
+The repositories are the ones VS Code would list for the workspace's folder: its own, and those one level down. Each shows its branch, marked as in VS Code when it has changed, staged or conflicting work, and, when it differs from its upstream, the commits to pull and to push. The folder's `.vscode/settings.json` is honoured for `git.scanRepositories`, `git.repositoryScanMaxDepth`, `git.autoRepositoryDetection`, `git.repositoryScanIgnoredFolders`, `git.ignoredRepositories` and `git.openRepositoryInParentFolders`.
 
 In the working tree part you write a commit message, stage and unstage files, discard changes, and commit what is staged. Changed files are shown as a tree of folders, and a folder's buttons act on everything in it. The arrow at the right of the Commit button opens the other ways to commit, among them amending the last commit. Files in conflict are listed apart, and staging one marks it resolved.
 

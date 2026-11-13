@@ -37,16 +37,30 @@ export function Repositories({ list, selected, folded, onFold, onSelect }: Props
               {repository.name}
             </T>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 3, flexShrink: 0, maxWidth: "60%" }}>
-              <Icon icon={codicon.gitBranch} size={small + 2} color={c.foregroundMuted} />
+              <Icon icon={branchIcon(repository)} size={small + 2} color={c.foregroundMuted} />
               <T size={small} color={c.foregroundMuted} lines={1} style={{ flexShrink: 1, minWidth: 0 }}>
-                {repository.branch ?? "detached"}
+                {branchLabel(repository)}
               </T>
               {/* What a pull would bring and a push would send, as VS Code counts them beside the branch. */}
-              {(repository.ahead > 0 || repository.behind > 0) && <T size={small} color={c.foreground}>{` ${repository.behind}↓ ${repository.ahead}↑`}</T>}
+              {(repository.ahead > 0 || repository.behind > 0) && <T size={small} color={c.foregroundMuted}>{` ${repository.behind}↓ ${repository.ahead}↑`}</T>}
             </View>
           </Pressable>
         );
       })}
     </View>
   );
+}
+
+/** The branch's name as VS Code shows it beside a repository: "*" for changed files, "+" for staged ones, "!" for a merge or rebase under way. */
+function branchLabel({ branch, head, changed, staged, merging }: Repository) {
+  return (branch ?? head?.slice(0, 8)) + (changed ? "*" : "") + (staged ? "+" : "") + (merging ? "!" : "");
+}
+
+/** VS Code's icon for the same: the most pressing of those, or the commit when no branch is checked out. */
+function branchIcon({ branch, changed, staged, merging }: Repository) {
+  if (branch === null) return codicon.gitCommit;
+  if (merging) return codicon.gitBranchConflicts;
+  if (staged) return codicon.gitBranchStagedChanges;
+  if (changed) return codicon.gitBranchChanges;
+  return codicon.gitBranch;
 }
