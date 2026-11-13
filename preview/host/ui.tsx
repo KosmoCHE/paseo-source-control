@@ -5,9 +5,11 @@ import { icons } from "lucide-react";
 import type { ReactNode } from "react";
 import { Text, View } from "react-native";
 
-export function Icon({ name, size = 24, color }: { name: string; size?: number; color?: string }) {
-  const Glyph = icons[name as keyof typeof icons];
-  if (!Glyph) throw new Error(`Unknown Lucide icon: ${name}`); // the real host draws nothing; here a typo should be loud
+export function Icon({ name, icon = name, size = 24, color }: { name?: string; icon?: string | { svg: string }; size?: number; color?: string }) {
+  // Inline SVG: the host draws it at the size asked for, in the colour asked for.
+  if (typeof icon === "object") return <span style={{ display: "flex", color }} dangerouslySetInnerHTML={{ __html: icon.svg.replace('width="16" height="16"', `width="${size}" height="${size}"`) }} />;
+  const Glyph = icons[icon as keyof typeof icons];
+  if (!Glyph) throw new Error(`Unknown Lucide icon: ${icon}`); // the real host draws nothing; here a typo should be loud
   return <Glyph size={size} color={color} />;
 }
 

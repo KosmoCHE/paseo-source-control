@@ -65,6 +65,7 @@ client/Graph.tsx   draws the graph rows
 client/Changes.tsx the working tree part
 client/tree.ts     arranges changed files as a tree of folders
 client/Files.tsx   draws that tree
+client/codicons.ts the icons taken from VS Code
 client/Diff.tsx    the diff tab
 client/Panel.tsx   puts the panel together
 test/              node:test suites for the git reader, the repository search, the lanes, the file tree and the patch reader
@@ -82,6 +83,8 @@ npm run preview    # then open http://127.0.0.1:4173/?cwd=/path/to/a/repository
 ```
 
 The preview renders the real panel under React Native Web with stand-ins for the Paseo host, and answers its RPCs with the plugin's own daemon half, so the buttons act on the repository you point it at. Address parameters: `theme=light`, `compact`, `width=<sidebar width>`, and `press=<button name>|<button name>` to click through to a state.
+
+The branch and repository icons are VS Code's own, from [vscode-codicons](https://github.com/microsoft/vscode-codicons) (CC BY 4.0); the rest are Paseo's Lucide icons.
 
 ## Limits
 

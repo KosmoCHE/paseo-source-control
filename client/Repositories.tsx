@@ -3,6 +3,7 @@
 import { Icon } from "@getpaseo/plugin/client/ui";
 import { Pressable, View } from "react-native";
 import type { Repository } from "../shared/git";
+import { branch, repository as repositoryIcon } from "./codicons";
 import { Heading, T, Tint, useHost } from "./ui";
 
 interface Props {
@@ -30,12 +31,12 @@ export function Repositories({ list, selected, folded, onFold, onSelect }: Props
             style={{ flexDirection: "row", alignItems: "center", gap: 6, height: row, paddingLeft: 27, paddingRight: 8 }}
           >
             {chosen && <Tint color={c.accent} opacity={0.14} />}
-            <Icon name="FolderGit2" size={small + 3} color={c.foregroundMuted} />
+            <Icon icon={repositoryIcon} size={small + 3} color={c.foregroundMuted} />
             <T lines={1} weight={chosen ? "600" : undefined} style={{ flex: 1, minWidth: 0 }}>
               {repository.name}
             </T>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 3, flexShrink: 0, maxWidth: "60%" }}>
-              <Icon name="GitBranch" size={small + 1} color={c.foregroundMuted} />
+              <Icon icon={branch} size={small + 1} color={c.foregroundMuted} />
               <T size={small} color={c.foregroundMuted} lines={1} style={{ flexShrink: 1, minWidth: 0 }}>
                 {repository.branch ?? "detached"}
               </T>

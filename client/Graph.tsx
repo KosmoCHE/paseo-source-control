@@ -11,6 +11,7 @@ import { Pressable, View } from "react-native";
 import type { ViewStyle } from "react-native";
 import { showRpc, syncRpc } from "../shared/git";
 import type { Commit, Ref, Scope } from "../shared/git";
+import { branch } from "./codicons";
 import { showDiff } from "./diffTab";
 import { FileTree } from "./Files";
 import { key, useCommand } from "./git";
@@ -97,7 +98,7 @@ function Rails({ rail, height, kind }: { rail: Rail; height: number; kind: "comm
 function Badges({ refs }: { refs: Ref[] }) {
   const { c, small } = useHost();
   const local = new Set(refs.filter((ref) => ref.kind !== "remote" && ref.kind !== "tag").map((ref) => ref.name));
-  const icon = { head: "Target", branch: "GitBranch", remote: "Cloud", tag: "Tag" };
+  const icon = { head: "Target", branch, remote: "Cloud", tag: "Tag" };
   return (
     <View style={{ flexDirection: "row", flexShrink: 0, maxWidth: "55%", gap: 4, marginLeft: 6, overflow: "hidden" }}>
       {refs.map((ref) => {
@@ -111,7 +112,7 @@ function Badges({ refs }: { refs: Ref[] }) {
             accessibilityLabel={`${ref.kind} ${ref.name}`}
             style={{ flexDirection: "row", alignItems: "center", gap: 3, height: small + 7, paddingHorizontal: 5, borderRadius: 9, backgroundColor: head ? c.accent : c.surface2 }}
           >
-            <Icon name={icon[ref.kind]} size={small} color={ink} />
+            <Icon icon={icon[ref.kind]} size={small} color={ink} />
             {!mirror && (
               <T size={small} color={ink} lines={1} style={{ maxWidth: 110 }}>
                 {ref.name}
@@ -230,7 +231,7 @@ export function GraphHeader({ cwd, scope, onScope }: { cwd: string; scope: Scope
         onPress={() => onScope(scope === "all" ? "current" : "all")}
         style={{ flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 4 }}
       >
-        <Icon name="GitBranch" size={small + 2} color={c.foregroundMuted} />
+        <Icon icon={branch} size={small + 2} color={c.foregroundMuted} />
         <T size={small} color={c.foregroundMuted}>
           {scope === "all" ? "All" : "Auto"}
         </T>
