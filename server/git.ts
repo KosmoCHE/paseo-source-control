@@ -3,8 +3,9 @@
 import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 import { appendFile, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
 import type { RpcInput, RpcOutput } from "@getpaseo/plugin";
 import type {
@@ -17,6 +18,7 @@ import type {
   ignoreRpc,
   logRpc,
   markersRpc,
+  remotesRpc,
   removeRpc,
   showRpc,
   stageRpc,
@@ -37,11 +39,12 @@ interface Options {
   /** Exit codes that are answers, not failures. */
   accept?: number[];
   timeout?: number;
+  env?: Record<string, string>;
 }
 
-export async function git(cwd: string, args: string[], { accept = [], timeout }: Options = {}): Promise<string> {
+export async function git(cwd: string, args: string[], { accept = [], timeout, env }: Options = {}): Promise<string> {
   try {
-    const { stdout } = await run("git", args, { cwd, env: ENV, timeout, maxBuffer: 256 * 1024 * 1024 });
+    const { stdout } = await run("git", args, { cwd, env: { ...ENV, ...env }, timeout, maxBuffer: 256 * 1024 * 1024 });
     return stdout;
   } catch (error) {
     const failure = error as { code?: unknown; stdout?: string; stderr?: string; message: string };
@@ -182,12 +185,45 @@ async function hugeFolders(cwd: string) {
 }
 
 export async function status({ cwd }: RpcInput<typeof statusRpc>): Promise<RpcOutput<typeof statusRpc>> {
-  const [{ out, cut }, all] = await Promise.all([porcelain(cwd, "all"), git(cwd, ["for-each-ref", "--format=%(objectname) %(refname)"])]);
+  const [{ out, cut }, all, state] = await Promise.all([porcelain(cwd, "all"), git(cwd, ["for-each-ref", "--format=%(objectname) %(refname)"]), underWay(cwd)]);
   const now = parseStatus(out);
   const refs = createHash("sha1").update(all).digest("hex");
   // A branch without a commit yet has no reflog to read.
   const base = now.branch && now.head ? await knownBase(cwd, now.branch, refs) : null;
-  return { ...now, base: base === now.upstream ? null : base, refs, cutAt: cut ? STATUS_LIMIT : null, hugeFolders: cut ? await hugeFolders(cwd) : [] };
+  return { ...now, ...state, base: base === now.upstream ? null : base, refs, cutAt: cut ? STATUS_LIMIT : null, hugeFolders: cut ? await hugeFolders(cwd) : [] };
+}
+
+const gitDirs = new Map<string, string>(); // by repository: where git keeps its files, apart from the working tree in a worktree
+
+async function gitDir(cwd: string) {
+  let dir = gitDirs.get(cwd);
+  if (dir === undefined) gitDirs.set(cwd, (dir = (await git(cwd, ["rev-parse", "--absolute-git-dir"])).trim()));
+  return dir;
+}
+
+/** VS Code's test for a rebase under way: one of git's rebase folders, and the commit being applied. */
+const rebasing = (dir: string) => (existsSync(join(dir, "rebase-apply")) || existsSync(join(dir, "rebase-merge"))) && existsSync(join(dir, "REBASE_HEAD"));
+
+const uncommented = (text: string) => text.replace(/^\s*#.*$\n?/gm, "").trim(); // VS Code's stripCommitMessageComments
+
+/** A merge or rebase under way, and the message VS Code puts in the commit box for it, as VS Code reads them. */
+async function underWay(cwd: string) {
+  const dir = await gitDir(cwd);
+  const file = async (name: string) => (existsSync(join(dir, name)) ? readFile(join(dir, name), "utf8") : "");
+  const rebase = rebasing(dir);
+  const rebaseMessage = rebase ? (await git(cwd, ["show", "--no-patch", "--format=%B", (await file("REBASE_HEAD")).trim()])).trimEnd() : null;
+  const template = uncommented(await file("MERGE_MSG")) || uncommented(await file("SQUASH_MSG")) || (await commitTemplate(cwd));
+  return { operation: rebase ? ("rebase" as const) : existsSync(join(dir, "MERGE_HEAD")) ? ("merge" as const) : null, rebaseMessage, template };
+}
+
+/** git's commit.template, found as git finds it: "~" is the home folder, and a relative path is from the repository's root. */
+async function commitTemplate(cwd: string) {
+  const set = (await git(cwd, ["config", "--get", "commit.template"], { accept: [1] })).trim();
+  if (!set) return "";
+  const path = set.replace(/^~([^/]*)\//, (_, user: string) => `${user ? join(homedir(), "..", user) : homedir()}/`);
+  const file = isAbsolute(path) ? path : join(cwd, path);
+  // As in VS Code, a template that is not there is none.
+  return existsSync(file) ? uncommented(await readFile(file, "utf8")) : "";
 }
 
 /** Adds paths to the repository's .gitignore, a line each, as VS Code's Add to .gitignore writes them. */
@@ -307,7 +343,13 @@ export async function markers({ cwd, paths }: RpcInput<typeof markersRpc>): Prom
   return { paths: paths.filter((_, n) => marked[n]) };
 }
 
-export async function commit({ cwd, message, amend }: RpcInput<typeof commitRpc>) {
+export async function commit({ cwd, message, amend, all }: RpcInput<typeof commitRpc>) {
+  if (all) await git(cwd, ["add", "--all"]);
+  if (rebasing(await gitDir(cwd))) {
+    // As VS Code continues a rebase: with the commit's own message, no editor asked for.
+    await git(cwd, ["rebase", "--continue"], { env: { GIT_EDITOR: "true" } });
+    return {};
+  }
   try {
     // As VS Code commits: with the author git is told, never one it guesses from the machine.
     await git(cwd, ["-c", "user.useConfigOnly=true", "commit", ...(amend ? ["--amend"] : []), ...(message.trim() ? ["--message", message] : ["--no-edit"])]);
@@ -319,9 +361,31 @@ export async function commit({ cwd, message, amend }: RpcInput<typeof commitRpc>
   return {};
 }
 
-export async function sync({ cwd, action }: RpcInput<typeof syncRpc>) {
-  await git(cwd, [action], { timeout: 120_000 });
+const REMOTE = { timeout: 120_000 }; // a remote that does not answer is given up on
+
+export async function sync({ cwd, action, remote }: RpcInput<typeof syncRpc>) {
+  if (action === "sync") await syncChanges(cwd);
+  else if (action === "publish") await git(cwd, ["push", "--set-upstream", remote!, (await git(cwd, ["symbolic-ref", "--short", "HEAD"])).trim()], REMOTE);
+  else await git(cwd, [action], REMOTE);
   return {};
+}
+
+/**
+ * VS Code's Sync Changes: pull the upstream's branch from its remote, tags too, then push to it if the branch had commits
+ * the upstream lacked.
+ */
+async function syncChanges(cwd: string) {
+  const branch = (await git(cwd, ["symbolic-ref", "--short", "HEAD"])).trim();
+  const [remote, ref] = (await git(cwd, ["for-each-ref", "--format=%(upstream:remotename)%00%(upstream:remoteref)", `refs/heads/${branch}`])).trim().split("\0");
+  if (!remote || !ref) throw new Error(`The branch "${branch}" has no upstream to sync with.`);
+  const upstream = ref.replace(/^refs\/heads\//, "");
+  const ahead = Number((await git(cwd, ["rev-list", "--count", "@{upstream}..HEAD"])).trim());
+  await git(cwd, ["pull", "--tags", remote, upstream], REMOTE);
+  if (ahead > 0) await git(cwd, ["push", remote, `${branch}:${upstream}`], REMOTE);
+}
+
+export async function remotes({ cwd }: RpcInput<typeof remotesRpc>): Promise<RpcOutput<typeof remotesRpc>> {
+  return { remotes: (await git(cwd, ["remote"])).split("\n").filter(Boolean) };
 }
 
 // --- history --------------------------------------------------------------------

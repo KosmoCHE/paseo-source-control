@@ -16,7 +16,7 @@ Object.assign(process.env, {
   GIT_COMMITTER_NAME: "Ada",
   GIT_COMMITTER_EMAIL: "ada@example.com",
 });
-const { baseOf, commit, compare, discard, ignore, log, markers, remove, show, stage, status, unstage } = await import("../server/git.ts");
+const { baseOf, commit, compare, discard, ignore, log, markers, remotes, remove, show, stage, status, sync, unstage } = await import("../server/git.ts");
 const { diff } = await import("../server/diff.ts");
 
 /** The line ranges of a diff's changes, before and after. */
@@ -53,7 +53,7 @@ test("the first commit: untracked, staged, unstaged again, committed", async (t)
   assert.deepEqual(now.changes, [{ path: "read me.txt", status: "?" }]);
 
   await stage({ cwd, files: now.changes });
-  await commit({ cwd, message: "first", amend: false });
+  await commit({ cwd, message: "first", amend: false, all: false });
   now = await status({ cwd });
   assert.match(now.head!, /^[0-9a-f]{40}$/);
   assert.deepEqual([now.staged, now.changes, now.conflicts], [[], [], []]);
@@ -286,17 +286,17 @@ test("amending folds what is staged into the last commit, and rewords it when th
   write("b.txt", "two\n");
   await stage({ cwd, files: [{ path: "b.txt", status: "?" }] });
 
-  await commit({ cwd, message: "", amend: true });
+  await commit({ cwd, message: "", amend: true, all: false });
   assert.equal(git("log", "--format=%s"), "first");
   assert.equal(git("show", "--format=", "--name-only"), "a.txt\nb.txt");
 
-  await commit({ cwd, message: "first, reworded", amend: true });
+  await commit({ cwd, message: "first, reworded", amend: true, all: false });
   assert.equal(git("log", "--format=%s"), "first, reworded");
 });
 
 test("git's own message comes back when it refuses", async (t) => {
   const { cwd } = repository(t);
-  await assert.rejects(commit({ cwd, message: "nothing staged", amend: false }), /nothing to commit|no changes added|Initial commit/i);
+  await assert.rejects(commit({ cwd, message: "nothing staged", amend: false, all: false }), /nothing to commit|no changes added|Initial commit/i);
   await assert.rejects(status({ cwd: tmpdir() }), /not a git repository/);
 });
 
@@ -377,4 +377,102 @@ test("a binary file is not compared", async (t) => {
   const { cwd, write } = repository(t);
   write("image.bin", "\0\x01\x02");
   assert.deepEqual(await diff({ cwd, source: { kind: "changes" }, file: { path: "image.bin", status: "?" } }), { kind: "binary" });
+});
+
+test("Publish Branch makes the remote's branch the upstream; Sync Changes pulls, then pushes what the branch had", async (t) => {
+  const { cwd, git, write } = repository(t);
+  const bare = mkdtempSync(join(tmpdir(), "source-control-remote-"));
+  t.after(() => rmSync(bare, { recursive: true, force: true }));
+  execFileSync("git", ["init", "--quiet", "--bare", "--initial-branch=main"], { cwd: bare });
+  git("config", "pull.rebase", "false"); // as most set it: git refuses to pull a branch that parted from its upstream otherwise
+  write("a.txt", "a\n");
+  git("add", ".");
+  git("commit", "--quiet", "--message=root");
+  git("remote", "add", "origin", bare);
+  assert.deepEqual(await remotes({ cwd }), { remotes: ["origin"] });
+
+  await sync({ cwd, action: "publish", remote: "origin" });
+  assert.equal((await status({ cwd })).upstream, "origin/main");
+
+  // Someone else pushes a commit, and this branch makes one of its own.
+  const other = mkdtempSync(join(tmpdir(), "source-control-other-"));
+  t.after(() => rmSync(other, { recursive: true, force: true }));
+  execFileSync("git", ["clone", "--quiet", bare, other]);
+  writeFileSync(join(other, "theirs.txt"), "theirs\n");
+  execFileSync("git", ["add", "."], { cwd: other });
+  execFileSync("git", ["commit", "--quiet", "--message=theirs"], { cwd: other });
+  execFileSync("git", ["push", "--quiet"], { cwd: other });
+  write("mine.txt", "mine\n");
+  git("add", ".");
+  git("commit", "--quiet", "--message=mine");
+  git("fetch", "--quiet");
+  const before = await status({ cwd });
+  assert.deepEqual([before.ahead, before.behind], [1, 1]);
+
+  await sync({ cwd, action: "sync" });
+  const after = await status({ cwd });
+  assert.deepEqual([after.ahead, after.behind], [0, 0]);
+  const pushed = execFileSync("git", ["log", "--format=%s", "main"], { cwd: bare, encoding: "utf8" });
+  assert.match(pushed, /mine/);
+  assert.match(pushed, /theirs/);
+});
+
+test("a merge under way: VS Code's Continue commits it, starting from git's merge message", async (t) => {
+  const { cwd, git, write } = repository(t);
+  write("a.txt", "base\n");
+  git("add", ".");
+  git("commit", "--quiet", "--message=base");
+  git("switch", "--quiet", "--create", "side");
+  write("a.txt", "side\n");
+  git("commit", "--quiet", "--all", "--message=side");
+  git("switch", "--quiet", "main");
+  write("a.txt", "main\n");
+  git("commit", "--quiet", "--all", "--message=main");
+  assert.throws(() => git("merge", "--quiet", "side"));
+
+  let now = await status({ cwd });
+  assert.equal(now.operation, "merge");
+  assert.equal(now.template, "Merge branch 'side'"); // the comments git adds below it left out
+  write("a.txt", "both\n");
+  await stage({ cwd, files: now.conflicts });
+  await commit({ cwd, message: now.template, amend: false, all: false });
+  now = await status({ cwd });
+  assert.deepEqual([now.operation, now.template], [null, ""]);
+  assert.equal(git("log", "-1", "--format=%s"), "Merge branch 'side'");
+});
+
+test("a rebase under way: the commit box holds the commit being applied, and Continue goes on with the rebase", async (t) => {
+  const { cwd, git, write } = repository(t);
+  write("a.txt", "base\n");
+  git("add", ".");
+  git("commit", "--quiet", "--message=base");
+  git("switch", "--quiet", "--create", "side");
+  write("a.txt", "side\n");
+  git("commit", "--quiet", "--all", "--message=side's change");
+  git("switch", "--quiet", "main");
+  write("a.txt", "main\n");
+  git("commit", "--quiet", "--all", "--message=main");
+  git("switch", "--quiet", "side");
+  assert.throws(() => git("rebase", "--quiet", "main"));
+
+  let now = await status({ cwd });
+  assert.deepEqual([now.operation, now.rebaseMessage], ["rebase", "side's change"]);
+  write("a.txt", "main and side\n");
+  await stage({ cwd, files: now.conflicts });
+  await commit({ cwd, message: now.rebaseMessage!, amend: false, all: false });
+  now = await status({ cwd });
+  assert.deepEqual([now.operation, now.rebaseMessage, now.branch], [null, null, "side"]);
+  assert.equal(git("log", "-1", "--format=%s"), "side's change");
+});
+
+test("committing everything, as VS Code offers when nothing is staged, and the commit template", async (t) => {
+  const { cwd, git, write } = repository(t);
+  write("template.txt", "# what changed\nfix: \n");
+  git("config", "commit.template", "template.txt"); // from the repository's root
+  assert.equal((await status({ cwd })).template, "fix:");
+  write("a.txt", "a\n");
+  await commit({ cwd, message: "everything", amend: false, all: true });
+  const now = await status({ cwd });
+  assert.deepEqual([now.staged, now.changes], [[], []]);
+  assert.equal(git("show", "--name-only", "--format=", "HEAD"), "a.txt\ntemplate.txt");
 });

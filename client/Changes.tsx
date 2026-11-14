@@ -1,14 +1,16 @@
 // The working tree: the commit box, and the files that are staged, changed or in conflict. While the
 // files scroll, the title of their group and the folders they are in stay at the top, as in VS Code.
 
-import { Icon, Modal, useToast } from "@getpaseo/plugin/client/ui";
-import { useEffect, useState } from "react";
-import type { ReactNode } from "react";
-import { Pressable, TextInput, View } from "react-native";
 import { useRpc } from "@getpaseo/plugin/client";
-import { commitRpc, discardRpc, ignoreRpc, markersRpc, removeRpc, stageRpc, unstageRpc } from "../shared/git";
+import { Modal } from "@getpaseo/plugin/client/ui";
+import { useState } from "react";
+import type { ReactNode } from "react";
+import { Pressable, View } from "react-native";
+import { discardRpc, markersRpc, removeRpc, stageRpc, unstageRpc } from "../shared/git";
 import type { DiffSource, FileChange, Status } from "../shared/git";
 import * as codicon from "./codicons";
+import { CommitBox } from "./CommitBox";
+import type { Ask } from "./CommitBox";
 import { showDiff } from "./diffTab";
 import { fileRows } from "./Files";
 import { useCommand, useSteps } from "./git";
@@ -16,11 +18,7 @@ import { useOpenFile } from "./openFile";
 import type { Row } from "./sticky";
 import { StickyList } from "./StickyList";
 import { fileName } from "./tree";
-import { Heading, IconButton, T, toggle, useHint, useHost, useMenu } from "./ui";
-import type { MenuItem } from "./ui";
-
-const drafts = new Map<string, string>(); // repository → the message being written; outlives the panel, not the app
-const warned = new Set<string>(); // repositories told they have too many changes: as in VS Code, once while the app runs
+import { Heading, IconButton, T, toggle, useHost } from "./ui";
 
 /** One of VS Code's modal dialogs: a choice is answered with its label, Cancel or closing with null. */
 interface Question {
@@ -44,29 +42,12 @@ interface Props {
 }
 
 export function Changes({ cwd, workspaceId, status, folded, onFold }: Props) {
-  const { c, text } = useHost();
   const stage = useCommand(stageRpc, cwd);
   const unstage = useCommand(unstageRpc, cwd);
-  const commit = useCommand(commitRpc, cwd);
   const call = { stage: useRpc(stageRpc), discard: useRpc(discardRpc), remove: useRpc(removeRpc), markers: useRpc(markersRpc) };
-  const [message, setMessage] = useState(() => drafts.get(cwd) ?? "");
   const [question, setQuestion] = useState<Question | null>(null);
-  const ask = (title: string, text: string, choices: string[], danger = true) => new Promise<string | null>((answer) => setQuestion({ title, text, choices, danger, answer }));
+  const ask: Ask = (title, text, choices, danger = true) => new Promise((answer) => setQuestion({ title, text, choices, danger, answer }));
   const [shut, setShut] = useState<Record<string, string[]>>({}); // a group's title → the paths of its folded folders
-  const write = (next: string) => {
-    drafts.set(cwd, next);
-    setMessage(next);
-  };
-  const where = status.branch ?? `${status.head?.slice(0, 7)} (detached)`;
-  const written = message.trim() !== "";
-  const staged = status.staged.length > 0;
-  const canCommit = written && staged && !commit.isPending;
-  const send = (amend: boolean) => commit.mutate({ message, amend }, { onSuccess: () => write("") });
-  const pushed = status.upstream !== null && status.ahead === 0; // the last commit is already on the upstream
-  const amend = async () => {
-    const text = `The last commit is already on ${status.upstream}. Amending replaces it here, and the branch can then only be pushed by force.`;
-    if (!pushed || (await ask("Amend a pushed commit?", text, ["Amend"])) === "Amend") send(true);
-  };
   /**
    * VS Code's Discard Changes, asked about in its words: tracked files are restored, untracked ones go to the Trash,
    * and when the Trash cannot take them the question is whether to delete them for good.
@@ -167,29 +148,7 @@ export function Changes({ cwd, workspaceId, status, folded, onFold }: Props) {
     // A folder or file can be in more than one group: its rows are told apart by the group's key.
     return [{ key, depth: 0, inside: inner.length, onPress: () => onFold(key), render: heading }, ...inner.map((row) => ({ ...row, key: `${key}/${row.key}` }))];
   };
-  const head = (
-    <View style={{ padding: 8, gap: 8 }}>
-      <TextInput
-        accessibilityLabel="Commit message"
-        multiline
-        value={message}
-        onChangeText={write}
-        placeholder={`Message (commit on "${where}")`}
-        placeholderTextColor={c.foregroundMuted}
-        style={{ minHeight: 56, padding: 6, borderWidth: 1, borderRadius: 4, borderColor: c.border, backgroundColor: c.surface2, color: c.foreground, fontSize: text, textAlignVertical: "top" }}
-      />
-      {status.cutAt !== null && <TooMany cwd={cwd} cutAt={status.cutAt} hugeFolders={status.hugeFolders} />}
-      <CommitButton
-        enabled={canCommit}
-        onCommit={() => send(false)}
-        more={[
-          { label: "Commit", enabled: canCommit, onPress: () => send(false) },
-          // Folds what is staged into the last commit; a message, if one is written, replaces that commit's own.
-          { label: "Commit (Amend)", enabled: status.head !== null && (written || staged) && !commit.isPending, onPress: amend },
-        ]}
-      />
-    </View>
-  );
+  const head = <CommitBox cwd={cwd} status={status} ask={ask} />;
   const rows = [
     ...group(
       "Merge Changes",
@@ -251,77 +210,6 @@ export function Changes({ cwd, workspaceId, status, folded, onFold }: Props) {
         </Modal.Content>
       </Modal>
     </>
-  );
-}
-
-/**
- * What VS Code says when git status was cut short: a warning under the commit box while it lasts, and a notification
- * once. Where it would offer to add node_modules to .gitignore, the offer is a button here.
- */
-function TooMany({ cwd, cutAt, hugeFolders }: { cwd: string; cutAt: number; hugeFolders: string[] }) {
-  const { c, small } = useHost();
-  const toast = useToast();
-  useEffect(() => {
-    if (warned.has(cwd)) return;
-    warned.add(cwd);
-    toast.show(`The git repository at "${cwd}" has too many active changes, only a subset of Git features will be enabled.`, { variant: "warning" });
-  }, [cwd]);
-  return (
-    <View style={{ gap: 4, padding: 6, borderWidth: 1, borderRadius: 4, borderColor: c.statusWarning }}>
-      <T size={small}>{`Too many changes were detected. Only the first ${cutAt} changes will be shown below.`}</T>
-      {hugeFolders.map((folder) => (
-        <IgnoreFolder key={folder} cwd={cwd} folder={folder} />
-      ))}
-    </View>
-  );
-}
-
-function IgnoreFolder({ cwd, folder }: { cwd: string; folder: string }) {
-  const { c, small } = useHost();
-  const ignore = useCommand(ignoreRpc, cwd);
-  return (
-    <Pressable
-      {...useHint(`Add "${folder}" to the .gitignore at the repository's root`)}
-      accessibilityRole="button"
-      onPress={ignore.isPending ? undefined : () => ignore.mutate({ paths: [folder] })}
-      style={{ alignSelf: "flex-start" }}
-    >
-      <T size={small} color={c.accent}>{`Add "${folder}" to .gitignore`}</T>
-    </Pressable>
-  );
-}
-
-/** The button under the commit box, as VS Code splits it: the commit itself, and an arrow that opens the other ways to commit. */
-function CommitButton({ enabled, onCommit, more }: { enabled: boolean; onCommit: () => void; more: MenuItem[] }) {
-  const { c, text } = useHost();
-  const menu = useMenu();
-  const arrow = useHint("More actions");
-  return (
-    <View style={{ flexDirection: "row", borderRadius: 4, overflow: "hidden", backgroundColor: c.accent }}>
-      <Pressable
-        {...useHint("Commit the staged changes")}
-        accessibilityRole="button"
-        accessibilityLabel="Commit"
-        accessibilityState={{ disabled: !enabled }}
-        onPress={enabled ? onCommit : undefined} // not the disabled prop: that would switch off hovering, and the hint with it
-        style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 6, opacity: enabled ? 1 : 0.5 }}
-      >
-        <Icon icon={codicon.check} size={text + 3} color={c.accentForeground} />
-        <T weight="600" color={c.accentForeground}>
-          Commit
-        </T>
-      </Pressable>
-      <View style={{ width: 1, marginVertical: 5, backgroundColor: c.accentForeground, opacity: 0.4 }} />
-      <Pressable
-        {...arrow}
-        accessibilityRole="button"
-        accessibilityLabel="More commit actions"
-        onPress={() => arrow.ref.current && menu(arrow.ref.current, more)}
-        style={{ justifyContent: "center", paddingHorizontal: 8 }}
-      >
-        <Icon icon={codicon.chevronDown} size={text + 3} color={c.accentForeground} />
-      </Pressable>
-    </View>
   );
 }
 

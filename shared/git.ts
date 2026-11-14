@@ -79,6 +79,10 @@ export const statusRpc = defineRpc({
     // As in VS Code, git status is read for so many files at most: set when there were more, and only that many are listed.
     cutAt: z.number().nullable(),
     hugeFolders: z.array(z.string()), // then, the folders VS Code offers to add to .gitignore: node_modules, when git does not ignore it
+    operation: z.enum(["merge", "rebase"]).nullable(), // under way, to be continued from the commit button
+    rebaseMessage: z.string().nullable(), // while rebasing, the message of the commit being applied
+    // What VS Code starts the commit message from: the merge's or squash's message, else git's commit.template.
+    template: z.string(),
   }),
 });
 export type Status = z.infer<typeof statusRpc.output>;
@@ -166,15 +170,24 @@ export const ignoreRpc = defineRpc({ name: "git.ignore", input: z.object({ cwd: 
 
 export const commitRpc = defineRpc({
   name: "git.commit",
-  // Amending folds what is staged into the last commit; without a message it keeps that commit's own.
+  // Amending folds what is staged into the last commit; without a message it keeps that commit's own. `all` stages
+  // every change first, as VS Code's smart commit does. While a rebase is under way, it continues the rebase.
   input: z
-    .object({ cwd: z.string(), message: z.string(), amend: z.boolean() })
+    .object({ cwd: z.string(), message: z.string(), amend: z.boolean(), all: z.boolean() })
     .refine((input) => input.amend || input.message.trim() !== "", "A commit needs a message"),
   output: nothing,
 });
 
+/**
+ * Talks to the remote. `sync` is VS Code's Sync Changes: pull from the upstream, then push to it if there was anything
+ * to push. `publish` pushes the branch to `remote` and makes it the upstream.
+ */
 export const syncRpc = defineRpc({
   name: "git.sync",
-  input: z.object({ cwd: z.string(), action: z.enum(["fetch", "pull", "push"]) }),
+  input: z
+    .object({ cwd: z.string(), action: z.enum(["fetch", "pull", "push", "sync", "publish"]), remote: z.string().optional() })
+    .refine((input) => input.action !== "publish" || input.remote, "Publishing needs a remote"),
   output: nothing,
 });
+
+export const remotesRpc = defineRpc({ name: "git.remotes", input: z.object({ cwd: z.string() }), output: z.object({ remotes: z.array(z.string()) }) });
