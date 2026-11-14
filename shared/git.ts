@@ -127,11 +127,25 @@ export const diffSourceSchema = z.discriminatedUnion("kind", [
 ]);
 export type DiffSource = z.infer<typeof diffSourceSchema>;
 
+const lineRange = z.tuple([z.number(), z.number()]); // the first line, and the one after the last, counted from 1
+const range = z.tuple([z.number(), z.number(), z.number(), z.number()]); // start line and column, end line and the column after, from 1
+
+/** Lines that changed, as VS Code's diff computes them, with the stretches of text that changed within them. */
+export const lineChangeSchema = z.object({ original: lineRange, modified: lineRange, inner: z.array(z.object({ original: range, modified: range })) });
+export type LineChange = z.infer<typeof lineChangeSchema>;
+
+/** A file before and after, as VS Code's diff editor compares them; or, where it opens one side only, that side. */
 export const diffRpc = defineRpc({
   name: "git.diff",
   input: z.object({ cwd: z.string(), source: diffSourceSchema, file: fileSchema }),
-  output: z.object({ diff: z.string() }),
+  output: z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("binary") }),
+    // A file added, deleted, untracked or in conflict: VS Code opens it as it is, not as a diff.
+    z.object({ kind: z.literal("file"), lines: z.array(z.string()) }),
+    z.object({ kind: z.literal("diff"), original: z.array(z.string()), modified: z.array(z.string()), changes: z.array(lineChangeSchema), hitTimeout: z.boolean() }),
+  ]),
 });
+export type FileDiff = z.infer<typeof diffRpc.output>;
 
 const files = z.object({ cwd: z.string(), files: z.array(fileSchema).min(1) });
 

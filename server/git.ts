@@ -13,7 +13,6 @@ import type {
   Ref,
   commitRpc,
   compareRpc,
-  diffRpc,
   discardRpc,
   ignoreRpc,
   logRpc,
@@ -431,14 +430,4 @@ export function parseShortStat(out: string) {
 
 export async function compare({ cwd, from, to }: RpcInput<typeof compareRpc>): Promise<RpcOutput<typeof compareRpc>> {
   return { files: parseNameStatus(await git(cwd, ["diff", "--name-status", "-z", "--find-renames", from, to])) };
-}
-
-export async function diff({ cwd, source, file }: RpcInput<typeof diffRpc>): Promise<RpcOutput<typeof diffRpc>> {
-  const paths = pathsOf([file]);
-  if (source.kind === "commit") return { diff: await git(cwd, ["show", ...AS_PATCH, source.hash, "--", ...paths]) };
-  if (source.kind === "incoming" || source.kind === "outgoing") return { diff: await git(cwd, ["diff", "--find-renames", source.from, source.to, "--", ...paths]) };
-  if (source.kind === "staged") return { diff: await git(cwd, ["diff", "--cached", "--find-renames", "--", ...paths]) };
-  // An untracked file has nothing to compare with, so it is compared with nothing.
-  if (file.status === "?") return { diff: await git(cwd, ["diff", "--no-index", "--", "/dev/null", file.path], { accept: [1] }) };
-  return { diff: await git(cwd, ["diff", "--", ...paths]) };
 }

@@ -16,7 +16,11 @@ Object.assign(process.env, {
   GIT_COMMITTER_NAME: "Ada",
   GIT_COMMITTER_EMAIL: "ada@example.com",
 });
-const { baseOf, commit, compare, diff, discard, ignore, log, markers, remove, show, stage, status, unstage } = await import("../server/git.ts");
+const { baseOf, commit, compare, discard, ignore, log, markers, remove, show, stage, status, unstage } = await import("../server/git.ts");
+const { diff } = await import("../server/diff.ts");
+
+/** The line ranges of a diff's changes, before and after. */
+const ranges = (result: Awaited<ReturnType<typeof diff>>) => (result.kind === "diff" ? result.changes.map((change) => [change.original, change.modified]) : result.kind);
 
 function repository(t: TestContext) {
   const cwd = mkdtempSync(join(tmpdir(), "source-control-"));
@@ -35,8 +39,8 @@ test("the first commit: untracked, staged, unstaged again, committed", async (t)
   assert.equal(now.branch, "main");
   assert.equal(now.head, null);
   assert.deepEqual(now.changes, [{ path: "read me.txt", status: "?" }]);
-  const untracked = await diff({ cwd, source: { kind: "changes" }, file: now.changes[0] });
-  assert.match(untracked.diff, /^\+hello$/m);
+  // As VS Code opens it: the file itself, there being nothing to compare it with.
+  assert.deepEqual(await diff({ cwd, source: { kind: "changes" }, file: now.changes[0] }), { kind: "file", lines: ["hello", ""] });
 
   await stage({ cwd, files: now.changes });
   now = await status({ cwd });
@@ -71,8 +75,9 @@ test("edits, renames and discards", async (t) => {
     { path: "a.txt", status: "M" },
     { path: "new.txt", status: "?" },
   ]);
-  assert.match((await diff({ cwd, source: { kind: "changes" }, file: now.changes[0] })).diff, /^\+more$/m);
-  assert.match((await diff({ cwd, source: { kind: "staged" }, file: now.staged[0] })).diff, /^rename from b\.txt$/m);
+  assert.deepEqual(ranges(await diff({ cwd, source: { kind: "changes" }, file: now.changes[0] })), [[[2, 2], [2, 3]]]);
+  // A rename compares the old path with the new; the text is the same.
+  assert.deepEqual(ranges(await diff({ cwd, source: { kind: "staged" }, file: now.staged[0] })), []);
 
   await unstage({ cwd, files: now.staged });
   assert.deepEqual((await status({ cwd })).staged, []);
@@ -163,8 +168,7 @@ test("history carries parents and refs, and a merge shows what it brought in", a
   // Counted as the files are, against the first parent; a count of nothing is zero.
   assert.deepEqual(merge.stats, { files: 1, insertions: 1, deletions: 0 });
   assert.deepEqual((await show({ cwd, hash: all.commits[2].hash })).stats, { files: 1, insertions: 1, deletions: 0 });
-  const patch = await diff({ cwd, source: { kind: "commit", hash: all.commits[1].hash }, file: merge.files[0] });
-  assert.match(patch.diff, /^\+side$/m);
+  assert.deepEqual(await diff({ cwd, source: { kind: "commit", hash: all.commits[1].hash }, file: merge.files[0] }), { kind: "file", lines: ["side", ""] });
 
   assert.equal((await show({ cwd, hash: all.commits[0].hash })).message, "on later\n\nwith a body");
   assert.deepEqual((await show({ cwd, hash: all.commits[4].hash })).files, [{ path: "a.txt", status: "A" }]);
@@ -264,16 +268,14 @@ test("where the branch and its upstream parted, and what a pull and a push would
   assert.deepEqual(sync, { head, upstream, base: root });
   const incoming = await compare({ cwd, from: root, to: upstream });
   assert.deepEqual(incoming.files, [{ path: "a.txt", status: "M" }]);
-  const pulled = await diff({ cwd, source: { kind: "incoming", from: root, to: upstream }, file: incoming.files[0] });
-  assert.match(pulled.diff, /^-a$/m);
-  assert.match(pulled.diff, /^\+theirs$/m);
+  assert.deepEqual(ranges(await diff({ cwd, source: { kind: "incoming", from: root, to: upstream }, file: incoming.files[0] })), [[[1, 2], [1, 2]]]);
   const outgoing = await compare({ cwd, from: root, to: head });
   assert.deepEqual(outgoing.files, [{ path: "mine.txt", status: "A" }]);
 });
 
 test("an untracked file that has gone is an error, not an empty diff", async (t) => {
   const { cwd } = repository(t);
-  await assert.rejects(diff({ cwd, source: { kind: "changes" }, file: { path: "gone.txt", status: "?" } }), /Could not access/);
+  await assert.rejects(diff({ cwd, source: { kind: "changes" }, file: { path: "gone.txt", status: "?" } }), /ENOENT/);
 });
 
 test("amending folds what is staged into the last commit, and rewords it when there is a message", async (t) => {
@@ -353,4 +355,26 @@ test("an untracked file the Trash cannot take is left, and said so", async (t) =
   const { cwd } = repository(t);
   // A file that is not there fails the Trash without putting anything in it.
   assert.deepEqual(await discard({ cwd, files: [{ path: "gone.txt", status: "?" }], trash: true }), { trashFailed: true });
+});
+
+test("as in VS Code, a changed line marks the words that changed in it", async (t) => {
+  const { cwd, git, write } = repository(t);
+  write("abstract.tex", "Intro.\nMost fail. We compared versions of the evaluator.\nEnd.\n");
+  git("add", ".");
+  git("commit", "--quiet", "--message=first");
+  write("abstract.tex", "Intro.\nMost fail. On a 36-task audit subset, we compared versions of the evaluator.\nEnd.\n");
+  const result = await diff({ cwd, source: { kind: "changes" }, file: { path: "abstract.tex", status: "M" } });
+  assert.equal(result.kind, "diff");
+  if (result.kind !== "diff") return;
+  const text = (lines: string[], [line, start, , end]: number[]) => lines[line - 1].slice(start - 1, end - 1);
+  assert.deepEqual(
+    result.changes.flatMap((change) => change.inner.map((inner) => [text(result.original, inner.original), text(result.modified, inner.modified)])),
+    [["We", "On a 36-task audit subset, we"]],
+  );
+});
+
+test("a binary file is not compared", async (t) => {
+  const { cwd, write } = repository(t);
+  write("image.bin", "\0\x01\x02");
+  assert.deepEqual(await diff({ cwd, source: { kind: "changes" }, file: { path: "image.bin", status: "?" } }), { kind: "binary" });
 });

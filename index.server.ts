@@ -1,5 +1,6 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
-import { commit, compare, diff, discard, ignore, log, markers, remove, show, stage, status, sync, unstage } from "./server/git";
+import { commit, compare, discard, ignore, log, markers, remove, show, stage, status, sync, unstage } from "./server/git";
+import { diff } from "./server/diff";
 import { repositories } from "./server/repositories";
 import { commitRpc, compareRpc, diffRpc, discardRpc, ignoreRpc, logRpc, markersRpc, removeRpc, repositoriesRpc, showRpc, stageRpc, statusRpc, syncRpc, unstageRpc } from "./shared/git";
 

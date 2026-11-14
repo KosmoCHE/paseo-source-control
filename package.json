@@ -33,6 +33,7 @@
     "zod": "^4.4.3"
   },
   "dependencies": {
-    "strip-json-comments": "^5.0.3"
+    "strip-json-comments": "^5.0.3",
+    "vscode-diff": "^3.0.1"
   }
 }
