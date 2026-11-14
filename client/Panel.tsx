@@ -12,7 +12,7 @@ import { z } from "zod";
 import { logRpc, repositoriesRpc, scopeSchema } from "../shared/git";
 import type { Commit, Repository, Scope } from "../shared/git";
 import { Changes } from "./Changes";
-import { key, useStatus } from "./git";
+import { AutoFetch, key, useStatus } from "./git";
 import { CommitItem, GraphActions } from "./Graph";
 import type { Followed } from "./Graph";
 import { layout as lanes } from "./lanes";
@@ -76,6 +76,7 @@ function Workspace({ directory, workspaceId, tab }: { directory: string; workspa
   return (
     <>
       {found.error && <Notice failed>{found.error.message}</Notice>}
+      <AutoFetch cwd={cwd} />
       <Split
         sizes={view.sizes}
         onSizes={(sizes) => setView({ ...view, sizes })}
