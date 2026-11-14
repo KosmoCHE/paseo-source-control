@@ -7,17 +7,19 @@
 import { useRpc } from "@getpaseo/plugin/client";
 import { Icon, Loading, copyText, useToast } from "@getpaseo/plugin/client/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 import { Pressable, View } from "react-native";
 import type { ViewStyle } from "react-native";
-import { showRpc, syncRpc } from "../shared/git";
-import type { Commit, Ref, Scope } from "../shared/git";
+import { compareRpc, showRpc, syncRpc } from "../shared/git";
+import type { Ref, Scope } from "../shared/git";
 import * as codicon from "./codicons";
 import { showDiff } from "./diffTab";
 import { FileTree } from "./Files";
 import { key, useCommand } from "./git";
 import { width } from "./lanes";
 import type { Rail } from "./lanes";
-import { Heading, IconButton, Notice, T, Tint, useHint, useHost } from "./ui";
+import type { Pending, Row } from "./pending";
+import { IconButton, Notice, T, Tint, isDark, useHint, useHost } from "./ui";
 
 const LANE = 12; // between two lanes
 const LINE = 2;
@@ -26,6 +28,22 @@ const MOST = 10; // lanes drawn before the rail is cut off: the subject needs ro
 const laneX = (lane: number) => 11 + lane * LANE; // a lane's centre
 const railWidth = (lanes: number[]) => laneX(Math.min(width(lanes), MOST) - 1) + 10;
 
+// VS Code's colours for the upstream and for the branch the checked-out one was made from
+// (scmGraph.historyItemRemoteRefColor, scmGraph.historyItemBaseRefColor). The theme has no purple,
+// so these are VS Code's own values: for the upstream, its dark or its light one by the panel's background.
+const UPSTREAM = { dark: "#B180D7", light: "#652D90" };
+const BASE = "#EA5C00";
+
+/**
+ * The refs the graph colours, as VS Code does: the checked-out branch, its upstream, and the branch it was made from;
+ * with every branch shown, each other ref too, in its commit's lane colour. A ref left uncoloured is not shown.
+ */
+export interface Followed {
+  upstream: string | null;
+  base: string | null;
+  all: boolean;
+}
+
 /** A lane keeps one colour all the way down. */
 function usePaint() {
   const { c } = useHost();
@@ -33,7 +51,7 @@ function usePaint() {
   return (lane: number) => palette[lane % palette.length];
 }
 
-function Rails({ rail, height, kind }: { rail: Rail; height: number; kind: "commit" | "merge" | "head" }) {
+function Rails({ rail, height, kind }: { rail: Rail; height: number; kind: "commit" | "merge" | "head" | "pending" }) {
   const { c } = useHost();
   const paint = usePaint();
   const mid = height / 2;
@@ -61,7 +79,8 @@ function Rails({ rail, height, kind }: { rail: Rail; height: number; kind: "comm
       ...corner,
     };
   };
-  const ring = kind !== "commit"; // a merge is a ringed dot, the checked-out commit an empty ring
+  // A merge is a ringed dot, the checked-out commit an empty ring, the changes to pull or push a dashed one.
+  const ring = kind !== "commit";
   const radius = ring ? 5.5 : 4;
   return (
     <View style={{ width: railWidth([rail.col, ...rail.through, ...rail.into, ...rail.out]), height, overflow: "hidden" }}>
@@ -86,7 +105,9 @@ function Rails({ rail, height, kind }: { rail: Rail; height: number; kind: "comm
           justifyContent: "center",
           backgroundColor: ring ? c.surface0 : paint(rail.col),
           borderColor: paint(rail.col),
-          borderWidth: ring ? LINE : 0,
+          // VS Code draws the changes to pull or push with a thin dashed stroke (1px, dashes of 4 and gaps of 2).
+          borderWidth: kind === "pending" ? 1 : ring ? LINE : 0,
+          borderStyle: kind === "pending" ? "dashed" : "solid",
         }}
       >
         {kind === "merge" && <View style={{ width: 3, height: 3, borderRadius: 1.5, backgroundColor: paint(rail.col) }} />}
@@ -95,22 +116,34 @@ function Rails({ rail, height, kind }: { rail: Rail; height: number; kind: "comm
   );
 }
 
-function Badges({ refs }: { refs: Ref[] }) {
+function Badges({ refs, rail, followed }: { refs: Ref[]; rail: Rail; followed: Followed }) {
   const { c, small } = useHost();
-  const local = new Set(refs.filter((ref) => ref.kind !== "remote" && ref.kind !== "tag").map((ref) => ref.name));
+  const paint = usePaint();
+  const colour = (ref: Ref) => {
+    if (ref.kind === "head") return c.accent;
+    if (ref.kind !== "tag" && ref.name === followed.upstream) return isDark(c.surface0) ? UPSTREAM.dark : UPSTREAM.light;
+    if (ref.kind === "remote" && ref.name === followed.base) return BASE;
+    return followed.all ? paint(rail.col) : null;
+  };
+  const shown = refs.flatMap((ref) => {
+    const fill = colour(ref);
+    return fill ? [{ ref, fill }] : [];
+  });
+  if (!shown.length) return null;
+  const local = new Set(shown.filter(({ ref }) => ref.kind !== "remote" && ref.kind !== "tag").map(({ ref }) => ref.name));
   const icon = { head: codicon.target, branch: codicon.gitBranch, remote: codicon.cloud, tag: codicon.tag };
   return (
     <View style={{ flexDirection: "row", flexShrink: 0, maxWidth: "55%", gap: 4, marginLeft: 6, overflow: "hidden" }}>
-      {refs.map((ref) => {
-        const head = ref.kind === "head";
-        const ink = head ? c.accentForeground : c.foreground;
+      {shown.map(({ ref, fill }) => {
+        // On a coloured badge VS Code writes in the panel's background colour; the checked-out branch keeps the theme's pair.
+        const ink = ref.kind === "head" ? c.accentForeground : c.surface0;
         // A remote branch sitting on its local branch says nothing new by name: VS Code shows a bare cloud.
         const mirror = ref.kind === "remote" && local.has(ref.name.slice(ref.name.indexOf("/") + 1));
         return (
           <View
             key={ref.kind + ref.name}
             accessibilityLabel={`${ref.kind} ${ref.name}`}
-            style={{ flexDirection: "row", alignItems: "center", gap: 3, height: small + 7, paddingHorizontal: 5, borderRadius: 9, backgroundColor: head ? c.accent : c.surface2 }}
+            style={{ flexDirection: "row", alignItems: "center", gap: 3, height: small + 7, paddingHorizontal: 5, borderRadius: 9, backgroundColor: fill }}
           >
             <Icon icon={icon[ref.kind]} size={small} color={ink} />
             {!mirror && (
@@ -128,16 +161,18 @@ function Badges({ refs }: { refs: Ref[] }) {
 interface ItemProps {
   cwd: string;
   workspaceId: string;
-  commit: Commit;
+  commit: Row;
   rail: Rail;
+  followed: Followed;
   open: boolean;
   onToggle: () => void;
 }
 
-/** A commit's row, and under it the commit's details while it is open. */
-export function CommitItem({ cwd, workspaceId, commit, rail, open, onToggle }: ItemProps) {
+/** A commit's row, or that of the changes to pull or to push, and under it its details while it is open. */
+export function CommitItem({ cwd, workspaceId, commit, rail, followed, open, onToggle }: ItemProps) {
   const { c, row, small } = useHost();
   const head = commit.refs.some((ref) => ref.kind === "head");
+  const kind = commit.pending ? "pending" : head ? "head" : commit.parents.length > 1 ? "merge" : "commit";
   return (
     <View>
       <Pressable
@@ -148,7 +183,7 @@ export function CommitItem({ cwd, workspaceId, commit, rail, open, onToggle }: I
         style={{ flexDirection: "row", alignItems: "center", height: row, paddingRight: 8 }}
       >
         {open && <Tint color={c.accent} opacity={0.14} />}
-        <Rails rail={rail} height={row} kind={head ? "head" : commit.parents.length > 1 ? "merge" : "commit"} />
+        <Rails rail={rail} height={row} kind={kind} />
         <T lines={1} weight={head ? "600" : undefined} style={{ flexShrink: 1, minWidth: 0 }}>
           {commit.subject}
         </T>
@@ -156,16 +191,16 @@ export function CommitItem({ cwd, workspaceId, commit, rail, open, onToggle }: I
           {commit.author}
         </T>
         <View style={{ flex: 1 }} />
-        {commit.refs.length > 0 && <Badges refs={commit.refs} />}
+        <Badges refs={commit.refs} rail={rail} followed={followed} />
       </Pressable>
-      {open && <Details cwd={cwd} workspaceId={workspaceId} commit={commit} rail={rail} />}
+      {open &&
+        (commit.pending ? <PendingDetails cwd={cwd} workspaceId={workspaceId} pending={commit.pending} rail={rail} /> : <Details cwd={cwd} workspaceId={workspaceId} commit={commit} rail={rail} />)}
     </View>
   );
 }
 
 function Details({ cwd, workspaceId, commit, rail }: Pick<ItemProps, "cwd" | "workspaceId" | "commit" | "rail">) {
   const { c, small } = useHost();
-  const paint = usePaint();
   const toast = useToast();
   const read = useRpc(showRpc);
   const detail = useQuery({ queryKey: key("show", cwd, commit.hash), queryFn: () => read({ cwd, hash: commit.hash }), staleTime: Infinity });
@@ -175,43 +210,73 @@ function Details({ cwd, workspaceId, commit, rail }: Pick<ItemProps, "cwd" | "wo
       (error: Error) => toast.error(error.message),
     );
   return (
+    <Under rail={rail}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingRight: 8 }}>
+        <T mono size={small} color={c.foregroundMuted}>
+          {commit.hash.slice(0, 10)}
+        </T>
+        <IconButton icon={codicon.copy} label="Copy commit hash" onPress={copy} />
+        <T size={small} color={c.foregroundMuted} lines={1} style={{ flex: 1, minWidth: 0, textAlign: "right" }}>
+          {`${commit.author} · ${new Date(commit.time * 1000).toLocaleString()}`}
+        </T>
+      </View>
+      {detail.error ? (
+        <Notice failed>{detail.error.message}</Notice>
+      ) : !detail.data ? (
+        <Loading />
+      ) : (
+        <>
+          <T size={small + 1} selectable style={{ paddingRight: 8 }}>
+            {detail.data.message}
+          </T>
+          <FileTree files={detail.data.files} indent={0} onOpen={(file) => showDiff({ workspaceId, cwd, source: { kind: "commit", hash: commit.hash }, file })} />
+        </>
+      )}
+    </Under>
+  );
+}
+
+/** The files the changes to pull or to push touch, from where the branch and its upstream parted. */
+function PendingDetails({ cwd, workspaceId, pending, rail }: Pick<ItemProps, "cwd" | "workspaceId" | "rail"> & { pending: Pending }) {
+  const { c, small } = useHost();
+  const read = useRpc(compareRpc);
+  const { from, to } = pending;
+  const files = useQuery({ queryKey: key("compare", cwd, from, to), queryFn: () => read({ cwd, from, to }), staleTime: Infinity });
+  return (
+    <Under rail={rail}>
+      <T size={small} color={c.foregroundMuted} lines={1} style={{ paddingRight: 8 }}>
+        {pending.title}
+      </T>
+      {files.error ? (
+        <Notice failed>{files.error.message}</Notice>
+      ) : !files.data ? (
+        <Loading />
+      ) : (
+        <FileTree files={files.data.files} indent={0} onOpen={(file) => showDiff({ workspaceId, cwd, source: { kind: pending.kind, from, to }, file })} />
+      )}
+    </Under>
+  );
+}
+
+/** What shows under an open row: the lanes alive under it run on beside it, however tall it gets. */
+function Under({ rail, children }: { rail: Rail; children: ReactNode }) {
+  const { c } = useHost();
+  const paint = usePaint();
+  return (
     <View style={{ flexDirection: "row" }}>
       <Tint color={c.accent} opacity={0.06} />
-      {/* The lanes that are alive under the row run on through the details, however tall they get. */}
       <View style={{ width: railWidth(rail.below), overflow: "hidden" }}>
         {rail.below.map((lane) => (
           <View key={lane} style={{ position: "absolute", left: laneX(lane) - LINE / 2, top: 0, bottom: 0, width: LINE, backgroundColor: paint(lane) }} />
         ))}
       </View>
-      <View style={{ flex: 1, minWidth: 0, paddingVertical: 6, gap: 4 }}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingRight: 8 }}>
-          <T mono size={small} color={c.foregroundMuted}>
-            {commit.hash.slice(0, 10)}
-          </T>
-          <IconButton icon={codicon.copy} label="Copy commit hash" onPress={copy} />
-          <T size={small} color={c.foregroundMuted} lines={1} style={{ flex: 1, minWidth: 0, textAlign: "right" }}>
-            {`${commit.author} · ${new Date(commit.time * 1000).toLocaleString()}`}
-          </T>
-        </View>
-        {detail.error ? (
-          <Notice failed>{detail.error.message}</Notice>
-        ) : !detail.data ? (
-          <Loading />
-        ) : (
-          <>
-            <T size={small + 1} selectable style={{ paddingRight: 8 }}>
-              {detail.data.message}
-            </T>
-            <FileTree files={detail.data.files} indent={0} onOpen={(file) => showDiff({ workspaceId, cwd, source: { kind: "commit", hash: commit.hash }, file })} />
-          </>
-        )}
-      </View>
+      <View style={{ flex: 1, minWidth: 0, paddingVertical: 6, gap: 4 }}>{children}</View>
     </View>
   );
 }
 
-/** The graph's title bar: it folds the graph, and while the graph shows, picks its branches and reaches the remote. */
-export function GraphHeader({ cwd, scope, onScope, folded, onFold }: { cwd: string; scope: Scope; onScope: (scope: Scope) => void; folded: boolean; onFold: () => void }) {
+/** The buttons in the graph's title bar: they pick its branches and reach the remote. */
+export function GraphActions({ cwd, scope, onScope }: { cwd: string; scope: Scope; onScope: (scope: Scope) => void }) {
   const { c, small } = useHost();
   const toast = useToast();
   const queries = useQueryClient();
@@ -219,29 +284,24 @@ export function GraphHeader({ cwd, scope, onScope, folded, onFold }: { cwd: stri
   const run = (action: "fetch" | "pull" | "push", done: string) => sync.mutate({ action }, { onSuccess: () => toast.show(done, { variant: "success" }) });
   const scopeHint = useHint(scope === "all" ? "All branches are shown. Show only the current branch and its upstream" : "The current branch and its upstream are shown. Show all branches");
   return (
-    <Heading title="Graph" folded={folded} onFold={onFold}>
-      {/* A folded section keeps its actions to itself, as in VS Code. */}
-      {!folded && (
-        <>
-          <Pressable
-            {...scopeHint}
-            accessibilityRole="button"
-            accessibilityLabel={scope === "all" ? "Showing all branches. Show the current branch only" : "Showing the current branch. Show all branches"}
-            hitSlop={4}
-            onPress={() => onScope(scope === "all" ? "current" : "all")}
-            style={{ flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 4 }}
-          >
-            <Icon icon={codicon.gitBranch} size={small + 3} color={c.foregroundMuted} />
-            <T size={small} color={c.foregroundMuted}>
-              {scope === "all" ? "All" : "Auto"}
-            </T>
-          </Pressable>
-          <IconButton icon={codicon.gitFetch} label="Fetch" disabled={sync.isPending} onPress={() => run("fetch", "Fetched")} />
-          <IconButton icon={codicon.repoPull} label="Pull" disabled={sync.isPending} onPress={() => run("pull", "Pulled")} />
-          <IconButton icon={codicon.repoPush} label="Push" disabled={sync.isPending} onPress={() => run("push", "Pushed")} />
-          <IconButton icon={codicon.refresh} label="Refresh" onPress={() => void queries.invalidateQueries({ queryKey: key() })} />
-        </>
-      )}
-    </Heading>
+    <>
+      <Pressable
+        {...scopeHint}
+        accessibilityRole="button"
+        accessibilityLabel={scope === "all" ? "Showing all branches. Show the current branch only" : "Showing the current branch. Show all branches"}
+        hitSlop={4}
+        onPress={() => onScope(scope === "all" ? "current" : "all")}
+        style={{ flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 4 }}
+      >
+        <Icon icon={codicon.gitBranch} size={small + 3} color={c.foregroundMuted} />
+        <T size={small} color={c.foregroundMuted}>
+          {scope === "all" ? "All" : "Auto"}
+        </T>
+      </Pressable>
+      <IconButton icon={codicon.gitFetch} label="Fetch" disabled={sync.isPending} onPress={() => run("fetch", "Fetched")} />
+      <IconButton icon={codicon.repoPull} label="Pull" disabled={sync.isPending} onPress={() => run("pull", "Pulled")} />
+      <IconButton icon={codicon.repoPush} label="Push" disabled={sync.isPending} onPress={() => run("push", "Pushed")} />
+      <IconButton icon={codicon.refresh} label="Refresh" onPress={() => void queries.invalidateQueries({ queryKey: key() })} />
+    </>
   );
 }

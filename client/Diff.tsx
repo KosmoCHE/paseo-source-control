@@ -7,11 +7,13 @@ import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { FlatList, View } from "react-native";
 import { diffRpc } from "../shared/git";
+import type { DiffSource, FileChange } from "../shared/git";
 import { useDiffRequest } from "./diffTab";
 import type { DiffRequest } from "./diffTab";
 import { key } from "./git";
 import { parsePatch } from "./patch";
 import type { Line } from "./patch";
+import { fileName } from "./tree";
 import { HostProvider, Notice, T, Tint, useHost } from "./ui";
 
 export function DiffPanel({ theme, layout, workspaceId }: PluginWorkspacePanelProps) {
@@ -19,9 +21,7 @@ export function DiffPanel({ theme, layout, workspaceId }: PluginWorkspacePanelPr
   const host = useMemo(() => ({ theme, layout }), [theme, layout]);
   return (
     <HostProvider value={host}>
-      <View style={{ flex: 1, backgroundColor: theme.colors.surface0 }}>
-        {request ? <Diff request={request} /> : <Notice>Choose a file in Source Control to see its diff.</Notice>}
-      </View>
+      <View style={{ flex: 1, backgroundColor: theme.colors.surface0 }}>{request ? <Diff request={request} /> : <Notice>Choose a file in Source Control to see its diff.</Notice>}</View>
     </HostProvider>
   );
 }
@@ -29,7 +29,7 @@ export function DiffPanel({ theme, layout, workspaceId }: PluginWorkspacePanelPr
 function Diff({ request: { cwd, source, file } }: { request: DiffRequest }) {
   const { c, small } = useHost();
   const read = useRpc(diffRpc);
-  const fixed = source.kind === "commit"; // a commit never changes; the working tree keeps changing
+  const fixed = source.kind !== "staged" && source.kind !== "changes"; // commits never change; the working tree keeps changing
   const patch = useQuery({
     queryKey: key("diff", cwd, source, file),
     queryFn: () => read({ cwd, source, file }),
@@ -37,15 +37,14 @@ function Diff({ request: { cwd, source, file } }: { request: DiffRequest }) {
     refetchInterval: fixed ? false : 3000,
   });
   const lines = useMemo(() => parsePatch(patch.data?.diff ?? ""), [patch.data]);
-  const where = source.kind === "commit" ? source.hash.slice(0, 7) : source.kind === "staged" ? "Staged" : "Working tree";
   return (
     <View style={{ flex: 1 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, paddingVertical: 8, borderBottomWidth: 1, borderColor: c.border }}>
         <T weight="600" lines={1} style={{ flexShrink: 1, minWidth: 0 }}>
-          {file.from ? `${file.from} → ${file.path}` : file.path}
+          {`${fileName(file)} (${compared(source, file)})`}
         </T>
-        <T size={small} color={c.foregroundMuted}>
-          {where}
+        <T size={small} color={c.foregroundMuted} lines={1} style={{ flexShrink: 1000, minWidth: 0 }}>
+          {file.from ? `${file.from} → ${file.path}` : file.path}
         </T>
       </View>
       {patch.error ? (
@@ -59,6 +58,16 @@ function Diff({ request: { cwd, source, file } }: { request: DiffRequest }) {
       )}
     </View>
   );
+}
+
+/** What VS Code writes after a file's name in the title of its diff: the version shown, or the commit. */
+function compared(source: DiffSource, file: FileChange) {
+  if (source.kind === "commit") return source.hash.slice(0, 7);
+  if (source.kind === "incoming") return "Incoming Changes";
+  if (source.kind === "outgoing") return "Outgoing Changes";
+  if (file.status === "D") return "Deleted";
+  if (source.kind === "staged") return "Index";
+  return file.status === "?" ? "Untracked" : "Working Tree";
 }
 
 function DiffLine({ line }: { line: Line }) {

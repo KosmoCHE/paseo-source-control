@@ -15,7 +15,7 @@ import { Panel } from "../client/Panel";
 
 const params = new URLSearchParams(location.search);
 
-// Close to Paseo's own dark and light themes; the plugin itself never names a colour.
+// Close to Paseo's own dark and light themes; the plugin names no colour of its own but VS Code's two for the graph's branches.
 const dark = {
   surface0: "#17171a",
   surface1: "#1e1e22",

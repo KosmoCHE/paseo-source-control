@@ -64,6 +64,8 @@ export const statusRpc = defineRpc({
     branch: z.string().nullable(), // null when HEAD is detached
     head: hash.nullable(), // null before the first commit
     upstream: z.string().nullable(),
+    // The branch on a remote the checked-out branch was made from, found as VS Code finds it; null when that is its upstream.
+    base: z.string().nullable(),
     ahead: z.number(),
     behind: z.number(),
     conflicts: z.array(fileSchema),
@@ -74,14 +76,22 @@ export const statusRpc = defineRpc({
 });
 export type Status = z.infer<typeof statusRpc.output>;
 
-export const scopeSchema = z.enum(["current", "all"]); // current: the checked-out branch and its upstream
+export const scopeSchema = z.enum(["current", "all"]); // current: the checked-out branch, its upstream and the branch it was made from
 export type Scope = z.infer<typeof scopeSchema>;
 
 export const logRpc = defineRpc({
   name: "git.log",
   input: z.object({ cwd: z.string(), scope: scopeSchema, limit: z.number().int().positive() }),
-  output: z.object({ commits: z.array(commitSchema), more: z.boolean() }),
+  output: z.object({
+    commits: z.array(commitSchema),
+    more: z.boolean(),
+    // Where HEAD and its upstream stand when they differ: their commits, and the last commit they share.
+    sync: z.object({ head: hash, upstream: hash, base: hash }).nullable(),
+  }),
 });
+
+/** Where HEAD and its upstream stand, as the log reads it. */
+export type Sync = z.infer<typeof logRpc.output>["sync"];
 
 export const showRpc = defineRpc({
   name: "git.show",
@@ -89,10 +99,20 @@ export const showRpc = defineRpc({
   output: z.object({ message: z.string(), files: z.array(fileSchema) }),
 });
 
+/** The files that differ between two commits. */
+export const compareRpc = defineRpc({
+  name: "git.compare",
+  input: z.object({ cwd: z.string(), from: hash, to: hash }),
+  output: z.object({ files: z.array(fileSchema) }),
+});
+
 export const diffSourceSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("commit"), hash }),
   z.object({ kind: z.literal("staged") }),
   z.object({ kind: z.literal("changes") }),
+  // What a pull would bring, from the commit HEAD and its upstream share to the upstream; and what a push would send, to HEAD.
+  z.object({ kind: z.literal("incoming"), from: hash, to: hash }),
+  z.object({ kind: z.literal("outgoing"), from: hash, to: hash }),
 ]);
 export type DiffSource = z.infer<typeof diffSourceSchema>;
 

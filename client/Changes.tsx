@@ -1,4 +1,5 @@
-// The working tree: the commit box, and the files that are staged, changed or in conflict.
+// The working tree: the commit box, and the files that are staged, changed or in conflict. While the
+// files scroll, the title of their group and the folders they are in stay at the top, as in VS Code.
 
 import { Icon, Modal } from "@getpaseo/plugin/client/ui";
 import { useState } from "react";
@@ -8,10 +9,12 @@ import { commitRpc, discardRpc, stageRpc, unstageRpc } from "../shared/git";
 import type { DiffSource, FileChange, Status } from "../shared/git";
 import * as codicon from "./codicons";
 import { showDiff } from "./diffTab";
-import { FileTree } from "./Files";
+import { fileRows } from "./Files";
 import { useCommand } from "./git";
 import { useOpenFile } from "./openFile";
-import { Heading, IconButton, T, useHint, useHost, useMenu } from "./ui";
+import type { Row } from "./sticky";
+import { StickyList } from "./StickyList";
+import { Heading, IconButton, T, toggle, useHint, useHost, useMenu } from "./ui";
 import type { MenuItem } from "./ui";
 
 const drafts = new Map<string, string>(); // repository → the message being written; outlives the panel, not the app
@@ -28,8 +31,8 @@ interface Props {
   cwd: string;
   workspaceId: string;
   status: Status;
-  folded: string[];
-  onFold: (group: string) => void;
+  folded: string[]; // a group is folded when "group:<title>" is in it
+  onFold: (key: string) => void;
 }
 
 export function Changes({ cwd, workspaceId, status, folded, onFold }: Props) {
@@ -40,6 +43,7 @@ export function Changes({ cwd, workspaceId, status, folded, onFold }: Props) {
   const commit = useCommand(commitRpc, cwd);
   const [message, setMessage] = useState(() => drafts.get(cwd) ?? "");
   const [question, ask] = useState<Question | null>(null);
+  const [shut, setShut] = useState<Record<string, string[]>>({}); // a group's title → the paths of its folded folders
   const write = (next: string) => {
     drafts.set(cwd, next);
     setMessage(next);
@@ -76,62 +80,92 @@ export function Changes({ cwd, workspaceId, status, folded, onFold }: Props) {
   /** VS Code's Open File, on a file that is there to open. */
   const opener = (file: FileChange | null) =>
     openFile && file && file.status !== "D" && <IconButton icon={codicon.goToFile} label={`Open ${file.path}`} hint="Open File" onPress={() => openFile(`${cwd}/${file.path}`)} />;
-  const group = (title: string, files: FileChange[], source: DiffSource, all: ReactNode, each: (files: FileChange[], path: string, file: FileChange | null) => ReactNode) => (
-    <Group title={title} files={files} folded={folded.includes(title)} onFold={() => onFold(title)} onOpen={(file) => showDiff({ workspaceId, cwd, source, file })} all={all} each={each} />
+  /**
+   * A group's title and its files as a tree of folders, `all` being the action on the whole group and `each` the
+   * actions on one row: a file, or the files in a folder. An empty group is not shown at all.
+   */
+  const group = (title: string, files: FileChange[], source: DiffSource, all: ReactNode, each: (files: FileChange[], path: string, file: FileChange | null) => ReactNode): Row[] => {
+    if (!files.length) return [];
+    const key = `group:${title}`;
+    const open = !folded.includes(key);
+    const inner = open
+      ? fileRows({
+          files,
+          indent: 20,
+          depth: 1,
+          folded: shut[title] ?? [],
+          onFold: (path) => setShut({ ...shut, [title]: toggle(shut[title] ?? [], path) }),
+          // An untracked file has nothing to be compared with: as in VS Code, it opens as itself, where Paseo can open files.
+          onOpen: (file) => (openFile && file.status === "?" ? openFile(`${cwd}/${file.path}`) : showDiff({ workspaceId, cwd, source, file })),
+          actions: each,
+        })
+      : [];
+    const heading = (onPress: () => void, onChevron?: () => void) => (
+      <Heading title={title} folded={!open} onFold={onPress} onChevron={onChevron} count={files.length} group>
+        {all}
+      </Heading>
+    );
+    // A folder or file can be in more than one group: its rows are told apart by the group's key.
+    return [{ key, depth: 0, inside: inner.length, onPress: () => onFold(key), render: heading }, ...inner.map((row) => ({ ...row, key: `${key}/${row.key}` }))];
+  };
+  const head = (
+    <View style={{ padding: 8, gap: 8 }}>
+      <TextInput
+        accessibilityLabel="Commit message"
+        multiline
+        value={message}
+        onChangeText={write}
+        placeholder={`Message (commit on "${where}")`}
+        placeholderTextColor={c.foregroundMuted}
+        style={{ minHeight: 56, padding: 6, borderWidth: 1, borderRadius: 4, borderColor: c.border, backgroundColor: c.surface2, color: c.foreground, fontSize: text, textAlignVertical: "top" }}
+      />
+      <CommitButton
+        enabled={canCommit}
+        onCommit={() => send(false)}
+        more={[
+          { label: "Commit", enabled: canCommit, onPress: () => send(false) },
+          // Folds what is staged into the last commit; a message, if one is written, replaces that commit's own.
+          { label: "Commit (Amend)", enabled: status.head !== null && (written || staged) && !commit.isPending, onPress: amend },
+        ]}
+      />
+    </View>
   );
-  return (
-    <View>
-      <View style={{ padding: 8, gap: 8 }}>
-        <TextInput
-          accessibilityLabel="Commit message"
-          multiline
-          value={message}
-          onChangeText={write}
-          placeholder={`Message (commit on "${where}")`}
-          placeholderTextColor={c.foregroundMuted}
-          style={{ minHeight: 56, padding: 6, borderWidth: 1, borderRadius: 4, borderColor: c.border, backgroundColor: c.surface2, color: c.foreground, fontSize: text, textAlignVertical: "top" }}
-        />
-        <CommitButton
-          enabled={canCommit}
-          onCommit={() => send(false)}
-          more={[
-            { label: "Commit", enabled: canCommit, onPress: () => send(false) },
-            // Folds what is staged into the last commit; a message, if one is written, replaces that commit's own.
-            { label: "Commit (Amend)", enabled: status.head !== null && (written || staged) && !commit.isPending, onPress: amend },
-          ]}
-        />
-      </View>
-      {group("Merge Changes", status.conflicts, { kind: "changes" }, null, (files, path, file) => (
+  const rows = [
+    ...group("Merge Changes", status.conflicts, { kind: "changes" }, null, (files, path, file) => (
+      <>
+        {opener(file)}
+        <IconButton icon={codicon.add} label={`Mark ${path} as resolved`} hint="Mark as resolved" onPress={() => stage.mutate({ files })} />
+      </>
+    )),
+    ...group(
+      "Staged Changes",
+      status.staged,
+      { kind: "staged" },
+      <IconButton icon={codicon.remove} label="Unstage all changes" onPress={() => unstage.mutate({ files: status.staged })} />,
+      (files, path, file) => (
         <>
           {opener(file)}
-          <IconButton icon={codicon.add} label={`Mark ${path} as resolved`} hint="Mark as resolved" onPress={() => stage.mutate({ files })} />
+          <IconButton icon={codicon.remove} label={`Unstage ${path}`} hint="Unstage changes" onPress={() => unstage.mutate({ files })} />
         </>
-      ))}
-      {group(
-        "Staged Changes",
-        status.staged,
-        { kind: "staged" },
-        <IconButton icon={codicon.remove} label="Unstage all changes" onPress={() => unstage.mutate({ files: status.staged })} />,
-        (files, path, file) => (
-          <>
-            {opener(file)}
-            <IconButton icon={codicon.remove} label={`Unstage ${path}`} hint="Unstage changes" onPress={() => unstage.mutate({ files })} />
-          </>
-        ),
-      )}
-      {group(
-        "Changes",
-        status.changes,
-        { kind: "changes" },
-        <IconButton icon={codicon.add} label="Stage all changes" onPress={() => stage.mutate({ files: status.changes })} />,
-        (files, path, file) => (
-          <>
-            {opener(file)}
-            <IconButton icon={codicon.discard} label={`Discard changes in ${path}`} hint="Discard changes" onPress={() => drop(files, path)} />
-            <IconButton icon={codicon.add} label={`Stage ${path}`} hint="Stage changes" onPress={() => stage.mutate({ files })} />
-          </>
-        ),
-      )}
+      ),
+    ),
+    ...group(
+      "Changes",
+      status.changes,
+      { kind: "changes" },
+      <IconButton icon={codicon.add} label="Stage all changes" onPress={() => stage.mutate({ files: status.changes })} />,
+      (files, path, file) => (
+        <>
+          {opener(file)}
+          <IconButton icon={codicon.discard} label={`Discard changes in ${path}`} hint="Discard changes" onPress={() => drop(files, path)} />
+          <IconButton icon={codicon.add} label={`Stage ${path}`} hint="Stage changes" onPress={() => stage.mutate({ files })} />
+        </>
+      ),
+    ),
+  ];
+  return (
+    <>
+      <StickyList head={head} rows={rows} />
       <Modal title={question?.title ?? ""} open={question !== null} onOpenChange={(open) => !open && ask(null)}>
         <Modal.Content>
           {question && (
@@ -152,7 +186,7 @@ export function Changes({ cwd, workspaceId, status, folded, onFold }: Props) {
           )}
         </Modal.Content>
       </Modal>
-    </View>
+    </>
   );
 }
 
@@ -186,29 +220,6 @@ function CommitButton({ enabled, onCommit, more }: { enabled: boolean; onCommit:
       >
         <Icon icon={codicon.chevronDown} size={text + 3} color={c.accentForeground} />
       </Pressable>
-    </View>
-  );
-}
-
-interface GroupProps {
-  title: string;
-  files: FileChange[];
-  folded: boolean;
-  onFold: () => void;
-  onOpen: (file: FileChange) => void;
-  all: ReactNode; // an action on the whole group
-  each: (files: FileChange[], path: string, file: FileChange | null) => ReactNode; // the actions on one row: a file, or the files in a folder
-}
-
-/** A titled tree of files. An empty group is not shown at all. */
-function Group({ title, files, folded, onFold, onOpen, all, each }: GroupProps) {
-  if (!files.length) return null;
-  return (
-    <View>
-      <Heading title={title} folded={folded} onFold={onFold} count={files.length}>
-        {all}
-      </Heading>
-      {!folded && <FileTree files={files} indent={20} onOpen={onOpen} actions={each} />}
     </View>
   );
 }
