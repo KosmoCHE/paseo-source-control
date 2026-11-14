@@ -1,6 +1,6 @@
 // The panel's three sections, stacked. Each has a title bar that stays put, and under it a body that
-// scrolls on its own. As in VS Code, the repositories are as tall as their list, up to ten rows, and
-// do not resize; the line between the changes and the graph drags, as the sashes between VS Code's
+// scrolls on its own. As in VS Code, the repositories are as tall as their list, up to ten rows (on a
+// phone, up to a quarter of the panel), and do not resize; the line between the changes and the graph drags, as the sashes between VS Code's
 // panes do: one grows by what the other gives up. A folded section is as tall as what it still shows.
 
 import { useMemo, useRef, useState } from "react";
@@ -16,6 +16,7 @@ export type Sizes = z.infer<typeof sizesSchema>;
 
 const CAP = "40%"; // of the panel, for changes as tall as their content
 const REPOSITORIES = 10; // rows of repositories shown before their list scrolls, as VS Code's scm.repositories.visible
+const REPOSITORIES_ON_PHONE = "25%"; // of the panel: VS Code has no phone, and ten of its taller rows would leave the graph one
 const LEAST = 48; // the height a section keeps when its neighbour is dragged over it
 const TITLE: ViewStyle = { flexGrow: 0, flexShrink: 0 }; // a folded section: as tall as what is left of it
 const REST: ViewStyle = { flex: 1, minHeight: 0 }; // the section that takes the room the others leave
@@ -38,7 +39,7 @@ interface Props {
 }
 
 export function Split({ sizes, onSizes, repositories, changes, graph }: Props) {
-  const { c, row } = useHost();
+  const { c, compact, row } = useHost();
   const [now, setNow] = useState(sizes); // followed while the line is dragged, saved when it is let go
   const latest = useRef(now);
   latest.current = now;
@@ -66,7 +67,7 @@ export function Split({ sizes, onSizes, repositories, changes, graph }: Props) {
         : { flexGrow: 0, flexShrink: 0, height: `${now.changes * 100}%` };
   return (
     <View style={{ flex: 1 }} onLayout={measure("all")}>
-      <Part section={repositories} style={repositories.folded ? TITLE : { flexGrow: 0, flexShrink: 0, maxHeight: row * (1 + REPOSITORIES) }} />
+      <Part section={repositories} style={repositories.folded ? TITLE : { flexGrow: 0, flexShrink: 0, maxHeight: compact ? REPOSITORIES_ON_PHONE : row * (1 + REPOSITORIES) }} />
       <View style={{ height: 1, backgroundColor: c.border }} />
       <Part section={changes} style={changesStyle} onLayout={measure("changes")} />
       <Divider label="Resize Changes" fixed={changes.folded || graph.folded} onStart={begin} onDrag={drag} onEnd={end} />
