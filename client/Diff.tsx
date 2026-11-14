@@ -29,7 +29,7 @@ export function DiffPanel({ theme, layout, workspaceId }: PluginWorkspacePanelPr
 function Diff({ request: { cwd, source, file } }: { request: DiffRequest }) {
   const { c, small } = useHost();
   const read = useRpc(diffRpc);
-  const fixed = source.kind === "commit"; // a commit never changes; the working tree keeps changing
+  const fixed = source.kind !== "staged" && source.kind !== "changes"; // commits never change; the working tree keeps changing
   const patch = useQuery({
     queryKey: key("diff", cwd, source, file),
     queryFn: () => read({ cwd, source, file }),
@@ -63,6 +63,8 @@ function Diff({ request: { cwd, source, file } }: { request: DiffRequest }) {
 /** What VS Code writes after a file's name in the title of its diff: the version shown, or the commit. */
 function compared(source: DiffSource, file: FileChange) {
   if (source.kind === "commit") return source.hash.slice(0, 7);
+  if (source.kind === "incoming") return "Incoming Changes";
+  if (source.kind === "outgoing") return "Outgoing Changes";
   if (file.status === "D") return "Deleted";
   if (source.kind === "staged") return "Index";
   return file.status === "?" ? "Untracked" : "Working Tree";

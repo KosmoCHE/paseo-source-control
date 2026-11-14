@@ -16,7 +16,7 @@ Object.assign(process.env, {
   GIT_COMMITTER_NAME: "Ada",
   GIT_COMMITTER_EMAIL: "ada@example.com",
 });
-const { baseOf, commit, diff, discard, log, show, stage, status, unstage } = await import("../server/git.ts");
+const { baseOf, commit, compare, diff, discard, log, show, stage, status, unstage } = await import("../server/git.ts");
 
 function repository(t: TestContext) {
   const cwd = mkdtempSync(join(tmpdir(), "source-control-"));
@@ -224,6 +224,45 @@ test("the branch a branch was made from, found as VS Code finds it, and Auto sho
     auto.commits.map((c) => c.subject),
     ["on other", "root"],
   );
+});
+
+test("where the branch and its upstream parted, and what a pull and a push would carry", async (t) => {
+  const { cwd, git, write } = repository(t);
+  write("a.txt", "a\n");
+  git("add", ".");
+  git("commit", "--quiet", "--message=root");
+  const root = git("rev-parse", "HEAD");
+
+  // No upstream: nothing to pull or push.
+  assert.equal((await log({ cwd, scope: "all", limit: 10 })).sync, null);
+
+  git("remote", "add", "origin", "https://example.com/r.git");
+  git("update-ref", "refs/remotes/origin/main", "HEAD");
+  git("branch", "--quiet", "--set-upstream-to=origin/main");
+  // Level with its upstream: nothing either.
+  assert.equal((await log({ cwd, scope: "all", limit: 10 })).sync, null);
+
+  // A commit on the branch, and another that a fetch brought to the upstream.
+  write("mine.txt", "mine\n");
+  git("add", ".");
+  git("commit", "--quiet", "--message=mine");
+  const head = git("rev-parse", "HEAD");
+  git("checkout", "--quiet", "--detach", root);
+  write("a.txt", "theirs\n");
+  git("commit", "--quiet", "--all", "--message=theirs");
+  const upstream = git("rev-parse", "HEAD");
+  git("update-ref", "refs/remotes/origin/main", upstream);
+  git("switch", "--quiet", "main");
+
+  const { sync } = await log({ cwd, scope: "current", limit: 10 });
+  assert.deepEqual(sync, { head, upstream, base: root });
+  const incoming = await compare({ cwd, from: root, to: upstream });
+  assert.deepEqual(incoming.files, [{ path: "a.txt", status: "M" }]);
+  const pulled = await diff({ cwd, source: { kind: "incoming", from: root, to: upstream }, file: incoming.files[0] });
+  assert.match(pulled.diff, /^-a$/m);
+  assert.match(pulled.diff, /^\+theirs$/m);
+  const outgoing = await compare({ cwd, from: root, to: head });
+  assert.deepEqual(outgoing.files, [{ path: "mine.txt", status: "A" }]);
 });
 
 test("an untracked file that has gone is an error, not an empty diff", async (t) => {

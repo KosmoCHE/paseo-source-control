@@ -17,6 +17,7 @@ import { CommitItem, GraphActions } from "./Graph";
 import type { Followed } from "./Graph";
 import { layout as lanes } from "./lanes";
 import { FileOpener } from "./openFile";
+import { withPending } from "./pending";
 import { Repositories } from "./Repositories";
 import { Split, sizesSchema } from "./Split";
 import { HostProvider, Notice, PanelRoot, T, toggle, useHost } from "./ui";
@@ -121,14 +122,19 @@ function History({ cwd, workspaceId, scope }: { cwd: string; workspaceId: string
     placeholderData: keepPreviousData,
   });
   const commits = history.data?.commits ?? NONE;
-  const rails = useMemo(() => lanes(commits), [commits]);
+  const sync = history.data?.sync ?? null;
+  const branch = status?.branch ?? status?.head?.slice(0, 7) ?? "";
+  const upstream = status?.upstream ?? "";
+  // As in VS Code, the changes to pull and to push get a row each, from where the branch and its upstream parted.
+  const rows = useMemo(() => withPending(commits, sync, { branch, upstream }), [commits, sync, branch, upstream]);
+  const rails = useMemo(() => lanes(rows), [rows]);
   const followed = useMemo<Followed>(() => ({ upstream: status?.upstream ?? null, base: status?.base ?? null, all: scope === "all" }), [status?.upstream, status?.base, scope]);
   const extra = useMemo(() => ({ open, followed }), [open, followed]); // what the rows show besides the commits
   if (!status) return null;
   return (
     <FlatList
       style={{ flex: 1 }}
-      data={commits}
+      data={rows}
       extraData={extra}
       keyExtractor={(commit) => commit.hash}
       renderItem={({ item, index }) => (

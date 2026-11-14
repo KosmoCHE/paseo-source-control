@@ -7,16 +7,18 @@
 import { useRpc } from "@getpaseo/plugin/client";
 import { Icon, Loading, copyText, useToast } from "@getpaseo/plugin/client/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 import { Pressable, View } from "react-native";
 import type { ViewStyle } from "react-native";
-import { showRpc, syncRpc } from "../shared/git";
-import type { Commit, Ref, Scope } from "../shared/git";
+import { compareRpc, showRpc, syncRpc } from "../shared/git";
+import type { Ref, Scope } from "../shared/git";
 import * as codicon from "./codicons";
 import { showDiff } from "./diffTab";
 import { FileTree } from "./Files";
 import { key, useCommand } from "./git";
 import { width } from "./lanes";
 import type { Rail } from "./lanes";
+import type { Pending, Row } from "./pending";
 import { IconButton, Notice, T, Tint, isDark, useHint, useHost } from "./ui";
 
 const LANE = 12; // between two lanes
@@ -49,7 +51,7 @@ function usePaint() {
   return (lane: number) => palette[lane % palette.length];
 }
 
-function Rails({ rail, height, kind }: { rail: Rail; height: number; kind: "commit" | "merge" | "head" }) {
+function Rails({ rail, height, kind }: { rail: Rail; height: number; kind: "commit" | "merge" | "head" | "pending" }) {
   const { c } = useHost();
   const paint = usePaint();
   const mid = height / 2;
@@ -77,7 +79,8 @@ function Rails({ rail, height, kind }: { rail: Rail; height: number; kind: "comm
       ...corner,
     };
   };
-  const ring = kind !== "commit"; // a merge is a ringed dot, the checked-out commit an empty ring
+  // A merge is a ringed dot, the checked-out commit an empty ring, the changes to pull or push a dashed one.
+  const ring = kind !== "commit";
   const radius = ring ? 5.5 : 4;
   return (
     <View style={{ width: railWidth([rail.col, ...rail.through, ...rail.into, ...rail.out]), height, overflow: "hidden" }}>
@@ -102,7 +105,9 @@ function Rails({ rail, height, kind }: { rail: Rail; height: number; kind: "comm
           justifyContent: "center",
           backgroundColor: ring ? c.surface0 : paint(rail.col),
           borderColor: paint(rail.col),
-          borderWidth: ring ? LINE : 0,
+          // VS Code draws the changes to pull or push with a thin dashed stroke (1px, dashes of 4 and gaps of 2).
+          borderWidth: kind === "pending" ? 1 : ring ? LINE : 0,
+          borderStyle: kind === "pending" ? "dashed" : "solid",
         }}
       >
         {kind === "merge" && <View style={{ width: 3, height: 3, borderRadius: 1.5, backgroundColor: paint(rail.col) }} />}
@@ -156,17 +161,18 @@ function Badges({ refs, rail, followed }: { refs: Ref[]; rail: Rail; followed: F
 interface ItemProps {
   cwd: string;
   workspaceId: string;
-  commit: Commit;
+  commit: Row;
   rail: Rail;
   followed: Followed;
   open: boolean;
   onToggle: () => void;
 }
 
-/** A commit's row, and under it the commit's details while it is open. */
+/** A commit's row, or that of the changes to pull or to push, and under it its details while it is open. */
 export function CommitItem({ cwd, workspaceId, commit, rail, followed, open, onToggle }: ItemProps) {
   const { c, row, small } = useHost();
   const head = commit.refs.some((ref) => ref.kind === "head");
+  const kind = commit.pending ? "pending" : head ? "head" : commit.parents.length > 1 ? "merge" : "commit";
   return (
     <View>
       <Pressable
@@ -177,7 +183,7 @@ export function CommitItem({ cwd, workspaceId, commit, rail, followed, open, onT
         style={{ flexDirection: "row", alignItems: "center", height: row, paddingRight: 8 }}
       >
         {open && <Tint color={c.accent} opacity={0.14} />}
-        <Rails rail={rail} height={row} kind={head ? "head" : commit.parents.length > 1 ? "merge" : "commit"} />
+        <Rails rail={rail} height={row} kind={kind} />
         <T lines={1} weight={head ? "600" : undefined} style={{ flexShrink: 1, minWidth: 0 }}>
           {commit.subject}
         </T>
@@ -187,14 +193,14 @@ export function CommitItem({ cwd, workspaceId, commit, rail, followed, open, onT
         <View style={{ flex: 1 }} />
         <Badges refs={commit.refs} rail={rail} followed={followed} />
       </Pressable>
-      {open && <Details cwd={cwd} workspaceId={workspaceId} commit={commit} rail={rail} />}
+      {open &&
+        (commit.pending ? <PendingDetails cwd={cwd} workspaceId={workspaceId} pending={commit.pending} rail={rail} /> : <Details cwd={cwd} workspaceId={workspaceId} commit={commit} rail={rail} />)}
     </View>
   );
 }
 
 function Details({ cwd, workspaceId, commit, rail }: Pick<ItemProps, "cwd" | "workspaceId" | "commit" | "rail">) {
   const { c, small } = useHost();
-  const paint = usePaint();
   const toast = useToast();
   const read = useRpc(showRpc);
   const detail = useQuery({ queryKey: key("show", cwd, commit.hash), queryFn: () => read({ cwd, hash: commit.hash }), staleTime: Infinity });
@@ -204,37 +210,67 @@ function Details({ cwd, workspaceId, commit, rail }: Pick<ItemProps, "cwd" | "wo
       (error: Error) => toast.error(error.message),
     );
   return (
+    <Under rail={rail}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingRight: 8 }}>
+        <T mono size={small} color={c.foregroundMuted}>
+          {commit.hash.slice(0, 10)}
+        </T>
+        <IconButton icon={codicon.copy} label="Copy commit hash" onPress={copy} />
+        <T size={small} color={c.foregroundMuted} lines={1} style={{ flex: 1, minWidth: 0, textAlign: "right" }}>
+          {`${commit.author} · ${new Date(commit.time * 1000).toLocaleString()}`}
+        </T>
+      </View>
+      {detail.error ? (
+        <Notice failed>{detail.error.message}</Notice>
+      ) : !detail.data ? (
+        <Loading />
+      ) : (
+        <>
+          <T size={small + 1} selectable style={{ paddingRight: 8 }}>
+            {detail.data.message}
+          </T>
+          <FileTree files={detail.data.files} indent={0} onOpen={(file) => showDiff({ workspaceId, cwd, source: { kind: "commit", hash: commit.hash }, file })} />
+        </>
+      )}
+    </Under>
+  );
+}
+
+/** The files the changes to pull or to push touch, from where the branch and its upstream parted. */
+function PendingDetails({ cwd, workspaceId, pending, rail }: Pick<ItemProps, "cwd" | "workspaceId" | "rail"> & { pending: Pending }) {
+  const { c, small } = useHost();
+  const read = useRpc(compareRpc);
+  const { from, to } = pending;
+  const files = useQuery({ queryKey: key("compare", cwd, from, to), queryFn: () => read({ cwd, from, to }), staleTime: Infinity });
+  return (
+    <Under rail={rail}>
+      <T size={small} color={c.foregroundMuted} lines={1} style={{ paddingRight: 8 }}>
+        {pending.title}
+      </T>
+      {files.error ? (
+        <Notice failed>{files.error.message}</Notice>
+      ) : !files.data ? (
+        <Loading />
+      ) : (
+        <FileTree files={files.data.files} indent={0} onOpen={(file) => showDiff({ workspaceId, cwd, source: { kind: pending.kind, from, to }, file })} />
+      )}
+    </Under>
+  );
+}
+
+/** What shows under an open row: the lanes alive under it run on beside it, however tall it gets. */
+function Under({ rail, children }: { rail: Rail; children: ReactNode }) {
+  const { c } = useHost();
+  const paint = usePaint();
+  return (
     <View style={{ flexDirection: "row" }}>
       <Tint color={c.accent} opacity={0.06} />
-      {/* The lanes that are alive under the row run on through the details, however tall they get. */}
       <View style={{ width: railWidth(rail.below), overflow: "hidden" }}>
         {rail.below.map((lane) => (
           <View key={lane} style={{ position: "absolute", left: laneX(lane) - LINE / 2, top: 0, bottom: 0, width: LINE, backgroundColor: paint(lane) }} />
         ))}
       </View>
-      <View style={{ flex: 1, minWidth: 0, paddingVertical: 6, gap: 4 }}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingRight: 8 }}>
-          <T mono size={small} color={c.foregroundMuted}>
-            {commit.hash.slice(0, 10)}
-          </T>
-          <IconButton icon={codicon.copy} label="Copy commit hash" onPress={copy} />
-          <T size={small} color={c.foregroundMuted} lines={1} style={{ flex: 1, minWidth: 0, textAlign: "right" }}>
-            {`${commit.author} · ${new Date(commit.time * 1000).toLocaleString()}`}
-          </T>
-        </View>
-        {detail.error ? (
-          <Notice failed>{detail.error.message}</Notice>
-        ) : !detail.data ? (
-          <Loading />
-        ) : (
-          <>
-            <T size={small + 1} selectable style={{ paddingRight: 8 }}>
-              {detail.data.message}
-            </T>
-            <FileTree files={detail.data.files} indent={0} onOpen={(file) => showDiff({ workspaceId, cwd, source: { kind: "commit", hash: commit.hash }, file })} />
-          </>
-        )}
-      </View>
+      <View style={{ flex: 1, minWidth: 0, paddingVertical: 6, gap: 4 }}>{children}</View>
     </View>
   );
 }

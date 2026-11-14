@@ -9,6 +9,7 @@ import type {
   FileChange,
   Ref,
   commitRpc,
+  compareRpc,
   diffRpc,
   discardRpc,
   logRpc,
@@ -228,8 +229,11 @@ export function parseLog(out: string): Commit[] {
 }
 
 export async function log({ cwd, scope, limit }: RpcInput<typeof logRpc>): Promise<RpcOutput<typeof logRpc>> {
-  const tips = scope === "all" ? ["--branches", "--remotes", "--tags"] : await tracked(cwd);
-  const out = await git(cwd, [
+  // The checked-out branch's upstream, as a full ref name; nothing without one.
+  const upstream = (await git(cwd, ["for-each-ref", "--format=%(if)%(HEAD)%(then)%(upstream)%(end)", "refs/heads"])).trim();
+  const tips = scope === "all" ? ["--branches", "--remotes", "--tags"] : await tracked(cwd, upstream);
+  const [out, sync] = await Promise.all([
+    git(cwd, [
     "log",
     "--date-order",
     "--decorate=full",
@@ -239,18 +243,30 @@ export async function log({ cwd, scope, limit }: RpcInput<typeof logRpc>): Promi
     "HEAD",
     ...tips,
     "--",
+  ]),
+    syncOf(cwd, upstream),
   ]);
   const commits = parseLog(out);
-  return { commits: commits.slice(0, limit), more: commits.length > limit };
+  return { commits: commits.slice(0, limit), more: commits.length > limit, sync };
+}
+
+/** Where HEAD and `upstream` stand, for VS Code's Incoming and Outgoing Changes: null when they are one commit, or have none in common. */
+async function syncOf(cwd: string, upstream: string): Promise<RpcOutput<typeof logRpc>["sync"]> {
+  if (!upstream) return null;
+  // An upstream that was deleted, or HEAD before the first commit, verifies to nothing.
+  const verify = async (ref: string) => (await git(cwd, ["rev-parse", "--verify", "--quiet", ref + "^{commit}"], { accept: [1] })).trim();
+  const [head, tip] = await Promise.all([verify("HEAD"), verify(upstream)]);
+  if (!head || !tip || head === tip) return null;
+  const base = (await git(cwd, ["merge-base", head, tip], { accept: [1] })).trim();
+  return base ? { head, upstream: tip, base } : null;
 }
 
 /** What VS Code's Auto shows besides HEAD: the checked-out branch's upstream, and the branch on a remote it was made from. */
-async function tracked(cwd: string): Promise<string[]> {
+async function tracked(cwd: string, upstream: string): Promise<string[]> {
   // --ignore-missing, in the log, covers an upstream that was deleted.
-  const upstream = (await git(cwd, ["for-each-ref", "--format=%(if)%(HEAD)%(then)%(upstream)%(end)", "refs/heads"])).split("\n").filter(Boolean);
   const branch = (await git(cwd, ["symbolic-ref", "--quiet", "--short", "HEAD"], { accept: [1] })).trim(); // nothing when HEAD is detached
   const base = branch && (await baseOf(cwd, branch));
-  return base ? [...upstream, REMOTES + base] : upstream;
+  return [upstream, base ? REMOTES + base : ""].filter(Boolean);
 }
 
 /** Reads `--name-status -z`: status, path, and for a rename the old path before the new one. */
@@ -278,9 +294,14 @@ export async function show({ cwd, hash }: RpcInput<typeof showRpc>): Promise<Rpc
   return { message: message.trim(), files: parseNameStatus(files) };
 }
 
+export async function compare({ cwd, from, to }: RpcInput<typeof compareRpc>): Promise<RpcOutput<typeof compareRpc>> {
+  return { files: parseNameStatus(await git(cwd, ["diff", "--name-status", "-z", "--find-renames", from, to])) };
+}
+
 export async function diff({ cwd, source, file }: RpcInput<typeof diffRpc>): Promise<RpcOutput<typeof diffRpc>> {
   const paths = pathsOf([file]);
   if (source.kind === "commit") return { diff: await git(cwd, ["show", ...AS_PATCH, source.hash, "--", ...paths]) };
+  if (source.kind === "incoming" || source.kind === "outgoing") return { diff: await git(cwd, ["diff", "--find-renames", source.from, source.to, "--", ...paths]) };
   if (source.kind === "staged") return { diff: await git(cwd, ["diff", "--cached", "--find-renames", "--", ...paths]) };
   // An untracked file has nothing to compare with, so it is compared with nothing.
   if (file.status === "?") return { diff: await git(cwd, ["diff", "--no-index", "--", "/dev/null", file.path], { accept: [1] }) };
