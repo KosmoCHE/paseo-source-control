@@ -40,7 +40,7 @@ The host's theme comes first: surfaces, text, borders and accents are Paseo's. W
 
 | Difference | Why |
 | --- | --- |
-| Changed files show as a tree of folders by default | The user's preference; VS Code defaults to a list |
+| Changed files show as a tree of folders by default | Chosen for this panel; VS Code defaults to a list |
 | The selected repository is fetched every three minutes by default | The panel has no settings page to turn it on; VS Code's `git.autofetch` is off by default |
 | No action switches or creates branches | Branches are the agents' to manage |
 | The Repositories section always shows | With no status bar, it is the only place the branch and its sync state show |
