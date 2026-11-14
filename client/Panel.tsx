@@ -14,6 +14,7 @@ import type { Commit, Repository, Scope } from "../shared/git";
 import { Changes } from "./Changes";
 import { key, useStatus } from "./git";
 import { CommitItem, GraphActions } from "./Graph";
+import type { Followed } from "./Graph";
 import { layout as lanes } from "./lanes";
 import { FileOpener } from "./openFile";
 import { Repositories } from "./Repositories";
@@ -121,15 +122,25 @@ function History({ cwd, workspaceId, scope }: { cwd: string; workspaceId: string
   });
   const commits = history.data?.commits ?? NONE;
   const rails = useMemo(() => lanes(commits), [commits]);
+  const followed = useMemo<Followed>(() => ({ upstream: status?.upstream ?? null, base: status?.base ?? null, all: scope === "all" }), [status?.upstream, status?.base, scope]);
+  const extra = useMemo(() => ({ open, followed }), [open, followed]); // what the rows show besides the commits
   if (!status) return null;
   return (
     <FlatList
       style={{ flex: 1 }}
       data={commits}
-      extraData={open}
+      extraData={extra}
       keyExtractor={(commit) => commit.hash}
       renderItem={({ item, index }) => (
-        <CommitItem cwd={cwd} workspaceId={workspaceId} commit={item} rail={rails[index]} open={item.hash === open} onToggle={() => setOpen(item.hash === open ? null : item.hash)} />
+        <CommitItem
+          cwd={cwd}
+          workspaceId={workspaceId}
+          commit={item}
+          rail={rails[index]}
+          followed={followed}
+          open={item.hash === open}
+          onToggle={() => setOpen(item.hash === open ? null : item.hash)}
+        />
       )}
       ListFooterComponent={
         history.error ? (

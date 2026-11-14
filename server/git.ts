@@ -96,11 +96,74 @@ export function parseStatus(out: string) {
 }
 
 export async function status({ cwd }: RpcInput<typeof statusRpc>): Promise<RpcOutput<typeof statusRpc>> {
-  const [porcelain, refs] = await Promise.all([
+  const [porcelain, all] = await Promise.all([
     git(cwd, ["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all"]),
     git(cwd, ["for-each-ref", "--format=%(objectname) %(refname)"]),
   ]);
-  return { ...parseStatus(porcelain), refs: createHash("sha1").update(refs).digest("hex") };
+  const now = parseStatus(porcelain);
+  const refs = createHash("sha1").update(all).digest("hex");
+  // A branch without a commit yet has no reflog to read.
+  const base = now.branch && now.head ? await knownBase(cwd, now.branch, refs) : null;
+  return { ...now, base: base === now.upstream ? null : base, refs };
+}
+
+// --- the branch a branch was made from ------------------------------------------
+
+const CREATED = "branch: Created from ";
+const REMOTES = "refs/remotes/";
+
+/**
+ * The branch on a remote that `branch` was made from, found as VS Code finds it: the `vscode-merge-base` VS Code
+ * keeps in the branch's config, else what the reflog says the branch was created from, else the default branch of
+ * the default remote. VS Code writes what it finds back to the config; this reads only.
+ */
+export async function baseOf(cwd: string, branch: string): Promise<string | null> {
+  const kept = (await git(cwd, ["config", "--get", `branch.${branch}.vscode-merge-base`], { accept: [1] })).trim();
+  const fromConfig = kept && (await onRemote(cwd, kept, false));
+  if (fromConfig) return fromConfig;
+  const created = await createdFrom(cwd, branch);
+  const fromReflog = created && (await onRemote(cwd, created, true));
+  if (fromReflog) return fromReflog;
+  const remotes = (await git(cwd, ["remote"])).split("\n").filter(Boolean);
+  const remote = remotes.includes("origin") ? "origin" : remotes[0];
+  if (!remote) return null;
+  const head = (await git(cwd, ["symbolic-ref", "--quiet", "--short", `${REMOTES}${remote}/HEAD`], { accept: [1] })).trim();
+  return head ? onRemote(cwd, head, false) : null;
+}
+
+/** What the reflog says `branch` was created from, read as VS Code reads it: nothing unless it says so exactly once. */
+async function createdFrom(cwd: string, branch: string): Promise<string | null> {
+  const reflog = async (ref: string) => (await git(cwd, ["reflog", "show", "--format=%gs", ref, "--"])).split("\n");
+  const created = (await reflog(`refs/heads/${branch}`)).filter((entry) => entry.startsWith(CREATED));
+  if (created.length !== 1) return null;
+  const from = created[0].slice(CREATED.length);
+  if (from !== "HEAD") return from;
+  // Made from HEAD: the branch HEAD left the first time it moved to this one, as "checkout: moving from <it> to <branch>".
+  const moves = (await reflog("HEAD")).filter((entry) => entry.startsWith("checkout: moving from ") && entry.endsWith(` to ${branch}`));
+  return moves.length ? moves[moves.length - 1].split(" ")[3] : null;
+}
+
+/**
+ * The branch on a remote that `name` stands for, such as origin/main: the name itself when it is one, or with
+ * `follow` the upstream of the local branch it names. As in VS Code, a local branch of that name comes first.
+ */
+async function onRemote(cwd: string, name: string, follow: boolean): Promise<string | null> {
+  const out = await git(cwd, ["for-each-ref", "--format=%(refname)%00%(upstream)", `refs/heads/${name}`, `${REMOTES}${name}`]);
+  const refs = new Map(out.split("\n").map((line) => line.split("\0") as [string, string]));
+  const upstream = refs.get(`refs/heads/${name}`);
+  if (upstream !== undefined) return follow && upstream.startsWith(REMOTES) ? upstream.slice(REMOTES.length) : null;
+  return refs.has(`${REMOTES}${name}`) ? name : null;
+}
+
+const bases = new Map<string, { branch: string; refs: string; base: string | null }>(); // by repository: the last base found
+
+/** The base, looked for again only when the branch changes or a ref moves: the status is read every few seconds. */
+async function knownBase(cwd: string, branch: string, refs: string) {
+  const known = bases.get(cwd);
+  if (known?.branch === branch && known.refs === refs) return known.base;
+  const base = await baseOf(cwd, branch);
+  bases.set(cwd, { branch, refs, base });
+  return base;
 }
 
 export async function stage({ cwd, files }: RpcInput<typeof stageRpc>) {
@@ -165,11 +228,7 @@ export function parseLog(out: string): Commit[] {
 }
 
 export async function log({ cwd, scope, limit }: RpcInput<typeof logRpc>): Promise<RpcOutput<typeof logRpc>> {
-  const tips =
-    scope === "all"
-      ? ["--branches", "--remotes", "--tags"]
-      : // The checked-out branch's upstream; --ignore-missing covers one that was deleted.
-        (await git(cwd, ["for-each-ref", "--format=%(if)%(HEAD)%(then)%(upstream)%(end)", "refs/heads"])).split("\n").filter(Boolean);
+  const tips = scope === "all" ? ["--branches", "--remotes", "--tags"] : await tracked(cwd);
   const out = await git(cwd, [
     "log",
     "--date-order",
@@ -183,6 +242,15 @@ export async function log({ cwd, scope, limit }: RpcInput<typeof logRpc>): Promi
   ]);
   const commits = parseLog(out);
   return { commits: commits.slice(0, limit), more: commits.length > limit };
+}
+
+/** What VS Code's Auto shows besides HEAD: the checked-out branch's upstream, and the branch on a remote it was made from. */
+async function tracked(cwd: string): Promise<string[]> {
+  // --ignore-missing, in the log, covers an upstream that was deleted.
+  const upstream = (await git(cwd, ["for-each-ref", "--format=%(if)%(HEAD)%(then)%(upstream)%(end)", "refs/heads"])).split("\n").filter(Boolean);
+  const branch = (await git(cwd, ["symbolic-ref", "--quiet", "--short", "HEAD"], { accept: [1] })).trim(); // nothing when HEAD is detached
+  const base = branch && (await baseOf(cwd, branch));
+  return base ? [...upstream, REMOTES + base] : upstream;
 }
 
 /** Reads `--name-status -z`: status, path, and for a rename the old path before the new one. */

@@ -1,4 +1,5 @@
-// What every part of the panel is built from. Colours come from the host's theme only.
+// What every part of the panel is built from. Colours come from the host's theme, save the two VS Code
+// gives the graph's upstream and base branches, which the theme has no match for (see Graph.tsx).
 
 import type { PluginHostProps } from "@getpaseo/plugin/client";
 import { Icon } from "@getpaseo/plugin/client/ui";

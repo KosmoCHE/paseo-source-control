@@ -64,6 +64,8 @@ export const statusRpc = defineRpc({
     branch: z.string().nullable(), // null when HEAD is detached
     head: hash.nullable(), // null before the first commit
     upstream: z.string().nullable(),
+    // The branch on a remote the checked-out branch was made from, found as VS Code finds it; null when that is its upstream.
+    base: z.string().nullable(),
     ahead: z.number(),
     behind: z.number(),
     conflicts: z.array(fileSchema),
@@ -74,7 +76,7 @@ export const statusRpc = defineRpc({
 });
 export type Status = z.infer<typeof statusRpc.output>;
 
-export const scopeSchema = z.enum(["current", "all"]); // current: the checked-out branch and its upstream
+export const scopeSchema = z.enum(["current", "all"]); // current: the checked-out branch, its upstream and the branch it was made from
 export type Scope = z.infer<typeof scopeSchema>;
 
 export const logRpc = defineRpc({

@@ -16,7 +16,7 @@ Object.assign(process.env, {
   GIT_COMMITTER_NAME: "Ada",
   GIT_COMMITTER_EMAIL: "ada@example.com",
 });
-const { commit, diff, discard, log, show, stage, status, unstage } = await import("../server/git.ts");
+const { baseOf, commit, diff, discard, log, show, stage, status, unstage } = await import("../server/git.ts");
 
 function repository(t: TestContext) {
   const cwd = mkdtempSync(join(tmpdir(), "source-control-"));
@@ -166,6 +166,64 @@ test("history carries parents and refs, and a merge shows what it brought in", a
   const before = (await status({ cwd })).refs;
   git("tag", "v2");
   assert.notEqual((await status({ cwd })).refs, before);
+});
+
+test("the branch a branch was made from, found as VS Code finds it, and Auto showing it", async (t) => {
+  const { cwd, git, write } = repository(t);
+  write("a.txt", "a\n");
+  git("add", ".");
+  git("commit", "--quiet", "--message=root");
+  // A remote whose default branch main follows, and another branch on it.
+  git("remote", "add", "origin", "https://example.com/r.git");
+  git("update-ref", "refs/remotes/origin/main", "HEAD");
+  git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+  git("branch", "--quiet", "--set-upstream-to=origin/main");
+  git("switch", "--quiet", "--create", "other");
+  write("b.txt", "b\n");
+  git("add", ".");
+  git("commit", "--quiet", "--message=on other");
+  git("update-ref", "refs/remotes/origin/other", "HEAD");
+  git("switch", "--quiet", "main");
+
+  // The default branch is main's own upstream: nothing more to show.
+  let now = await status({ cwd });
+  assert.equal(now.upstream, "origin/main");
+  assert.equal(now.base, null);
+
+  // Created from a branch on the remote, without following it.
+  git("switch", "--quiet", "--no-track", "--create", "feature", "origin/main");
+  now = await status({ cwd });
+  assert.equal(now.upstream, null);
+  assert.equal(now.base, "origin/main");
+
+  // Created from a local branch: the branch that one follows.
+  git("branch", "--quiet", "--set-upstream-to=origin/other", "other");
+  git("switch", "--quiet", "--create", "topic", "other");
+  assert.equal(await baseOf(cwd, "topic"), "origin/other");
+
+  // Created from HEAD: the branch HEAD moved away from.
+  git("switch", "--quiet", "other");
+  git("switch", "--quiet", "--create", "deep");
+  assert.equal(await baseOf(cwd, "deep"), "origin/other");
+
+  // Neither: the remote's default branch.
+  git("checkout", "--quiet", "--detach");
+  git("switch", "--quiet", "--create", "loose");
+  assert.equal(await baseOf(cwd, "loose"), "origin/main");
+
+  // What VS Code keeps in the branch's config comes first, but only a branch on a remote counts.
+  git("config", "branch.feature.vscode-merge-base", "other");
+  assert.equal(await baseOf(cwd, "feature"), "origin/main");
+  git("config", "branch.feature.vscode-merge-base", "origin/other");
+  assert.equal(await baseOf(cwd, "feature"), "origin/other");
+
+  // Auto shows the base's history beside the branch's own.
+  git("switch", "--quiet", "feature");
+  const auto = await log({ cwd, scope: "current", limit: 10 });
+  assert.deepEqual(
+    auto.commits.map((c) => c.subject),
+    ["on other", "root"],
+  );
 });
 
 test("an untracked file that has gone is an error, not an empty diff", async (t) => {

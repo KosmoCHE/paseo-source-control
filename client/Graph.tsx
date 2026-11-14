@@ -26,6 +26,31 @@ const MOST = 10; // lanes drawn before the rail is cut off: the subject needs ro
 const laneX = (lane: number) => 11 + lane * LANE; // a lane's centre
 const railWidth = (lanes: number[]) => laneX(Math.min(width(lanes), MOST) - 1) + 10;
 
+// VS Code's colours for the upstream and for the branch the checked-out one was made from
+// (scmGraph.historyItemRemoteRefColor, scmGraph.historyItemBaseRefColor). The theme has no purple,
+// so these are VS Code's own values: for the upstream, its dark or its light one by the panel's background.
+const UPSTREAM = { dark: "#B180D7", light: "#652D90" };
+const BASE = "#EA5C00";
+
+/** Whether a theme colour is dark. The theme names no appearance, only colours, and they come as #rrggbb. */
+function isDark(color: string) {
+  const hex = /^#([0-9a-f]{6}|[0-9a-f]{3})$/i.exec(color)?.[1];
+  if (!hex) throw new Error(`A theme colour is not #rrggbb or #rgb: ${color}`);
+  const full = hex.length === 3 ? [...hex].map((digit) => digit + digit).join("") : hex;
+  const [r, g, b] = [0, 2, 4].map((at) => parseInt(full.slice(at, at + 2), 16) / 255);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.5;
+}
+
+/**
+ * The refs the graph colours, as VS Code does: the checked-out branch, its upstream, and the branch it was made from;
+ * with every branch shown, each other ref too, in its commit's lane colour. A ref left uncoloured is not shown.
+ */
+export interface Followed {
+  upstream: string | null;
+  base: string | null;
+  all: boolean;
+}
+
 /** A lane keeps one colour all the way down. */
 function usePaint() {
   const { c } = useHost();
@@ -95,22 +120,34 @@ function Rails({ rail, height, kind }: { rail: Rail; height: number; kind: "comm
   );
 }
 
-function Badges({ refs }: { refs: Ref[] }) {
+function Badges({ refs, rail, followed }: { refs: Ref[]; rail: Rail; followed: Followed }) {
   const { c, small } = useHost();
-  const local = new Set(refs.filter((ref) => ref.kind !== "remote" && ref.kind !== "tag").map((ref) => ref.name));
+  const paint = usePaint();
+  const colour = (ref: Ref) => {
+    if (ref.kind === "head") return c.accent;
+    if (ref.kind !== "tag" && ref.name === followed.upstream) return isDark(c.surface0) ? UPSTREAM.dark : UPSTREAM.light;
+    if (ref.kind === "remote" && ref.name === followed.base) return BASE;
+    return followed.all ? paint(rail.col) : null;
+  };
+  const shown = refs.flatMap((ref) => {
+    const fill = colour(ref);
+    return fill ? [{ ref, fill }] : [];
+  });
+  if (!shown.length) return null;
+  const local = new Set(shown.filter(({ ref }) => ref.kind !== "remote" && ref.kind !== "tag").map(({ ref }) => ref.name));
   const icon = { head: codicon.target, branch: codicon.gitBranch, remote: codicon.cloud, tag: codicon.tag };
   return (
     <View style={{ flexDirection: "row", flexShrink: 0, maxWidth: "55%", gap: 4, marginLeft: 6, overflow: "hidden" }}>
-      {refs.map((ref) => {
-        const head = ref.kind === "head";
-        const ink = head ? c.accentForeground : c.foreground;
+      {shown.map(({ ref, fill }) => {
+        // On a coloured badge VS Code writes in the panel's background colour; the checked-out branch keeps the theme's pair.
+        const ink = ref.kind === "head" ? c.accentForeground : c.surface0;
         // A remote branch sitting on its local branch says nothing new by name: VS Code shows a bare cloud.
         const mirror = ref.kind === "remote" && local.has(ref.name.slice(ref.name.indexOf("/") + 1));
         return (
           <View
             key={ref.kind + ref.name}
             accessibilityLabel={`${ref.kind} ${ref.name}`}
-            style={{ flexDirection: "row", alignItems: "center", gap: 3, height: small + 7, paddingHorizontal: 5, borderRadius: 9, backgroundColor: head ? c.accent : c.surface2 }}
+            style={{ flexDirection: "row", alignItems: "center", gap: 3, height: small + 7, paddingHorizontal: 5, borderRadius: 9, backgroundColor: fill }}
           >
             <Icon icon={icon[ref.kind]} size={small} color={ink} />
             {!mirror && (
@@ -130,12 +167,13 @@ interface ItemProps {
   workspaceId: string;
   commit: Commit;
   rail: Rail;
+  followed: Followed;
   open: boolean;
   onToggle: () => void;
 }
 
 /** A commit's row, and under it the commit's details while it is open. */
-export function CommitItem({ cwd, workspaceId, commit, rail, open, onToggle }: ItemProps) {
+export function CommitItem({ cwd, workspaceId, commit, rail, followed, open, onToggle }: ItemProps) {
   const { c, row, small } = useHost();
   const head = commit.refs.some((ref) => ref.kind === "head");
   return (
@@ -156,7 +194,7 @@ export function CommitItem({ cwd, workspaceId, commit, rail, open, onToggle }: I
           {commit.author}
         </T>
         <View style={{ flex: 1 }} />
-        {commit.refs.length > 0 && <Badges refs={commit.refs} />}
+        <Badges refs={commit.refs} rail={rail} followed={followed} />
       </Pressable>
       {open && <Details cwd={cwd} workspaceId={workspaceId} commit={commit} rail={rail} />}
     </View>
