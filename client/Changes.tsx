@@ -100,7 +100,7 @@ export function Changes({ cwd, workspaceId, status, folded, onFold }: Props) {
         })
       : [];
     const heading = (onPress: () => void) => (
-      <Heading title={title} folded={!open} onFold={onPress} count={files.length}>
+      <Heading title={title} folded={!open} onFold={onPress} count={files.length} group>
         {all}
       </Heading>
     );

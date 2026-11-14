@@ -192,15 +192,36 @@ export function IconButton({ icon, label, hint, onPress, disabled }: { icon: Cod
   );
 }
 
-/** The title bar of a section that folds. `children` are its actions, `count` how many things it holds. */
-export function Heading({ title, folded, onFold, count, children }: { title: string; folded: boolean; onFold: () => void; count?: number; children?: ReactNode }) {
+interface HeadingProps {
+  title: string;
+  folded: boolean;
+  onFold: () => void;
+  count?: number; // how many things it holds
+  group?: boolean; // the title of a group of changes inside a section: as VS Code draws it, a step in and in plain text
+  children?: ReactNode; // its actions
+}
+
+/** The title bar of something that folds: a section of the panel, or a group of changes. */
+export function Heading({ title, folded, onFold, count, group, children }: HeadingProps) {
   const { c, row, small } = useHost();
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel={title} accessibilityState={{ expanded: !folded }} onPress={onFold} style={{ flexDirection: "row", alignItems: "center", gap: 4, height: row, paddingHorizontal: 8 }}>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={title}
+      accessibilityState={{ expanded: !folded }}
+      onPress={onFold}
+      style={{ flexDirection: "row", alignItems: "center", gap: 4, height: row, paddingLeft: group ? 12 : 8, paddingRight: 8 }}
+    >
       <Icon icon={folded ? codicon.chevronRight : codicon.chevronDown} size={small + 5} color={c.foregroundMuted} />
-      <T size={small} weight="600" color={c.foregroundMuted} lines={1} style={{ flex: 1, minWidth: 0, textTransform: "uppercase" }}>
-        {title}
-      </T>
+      {group ? (
+        <T lines={1} style={{ flex: 1, minWidth: 0 }}>
+          {title}
+        </T>
+      ) : (
+        <T size={small} weight="600" color={c.foregroundMuted} lines={1} style={{ flex: 1, minWidth: 0, textTransform: "uppercase" }}>
+          {title}
+        </T>
+      )}
       {children}
       {count !== undefined && (
         <T size={small} color={c.foregroundMuted} style={{ minWidth: 12, textAlign: "center" }}>
