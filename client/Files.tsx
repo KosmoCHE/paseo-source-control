@@ -10,7 +10,7 @@ import * as codicon from "./codicons";
 import type { Row } from "./sticky";
 import { everyFile, fileName, tree } from "./tree";
 import type { Folder } from "./tree";
-import { T, toggle, useHost } from "./ui";
+import { Chevron, T, toggle, useHost } from "./ui";
 
 const STEP = 12; // how far each level is set in
 
@@ -51,7 +51,7 @@ export function fileRows({ files, indent, depth, folded, onFold, onOpen, actions
             depth: level,
             inside: inner.length,
             onPress: () => onFold(child.path),
-            render: (onPress: () => void) => <FolderRow folder={child} shut={shut} pad={pad} onPress={onPress} actions={actions} />,
+            render: (onPress: () => void, onChevron?: () => void) => <FolderRow folder={child} shut={shut} pad={pad} onPress={onPress} onChevron={onChevron} actions={actions} />,
           },
           ...inner,
         ];
@@ -86,13 +86,22 @@ function useLine() {
   return { flexDirection: "row", alignItems: "center", height: row, paddingRight: 8, gap: 5 } as const;
 }
 
-function FolderRow({ folder, shut, pad, onPress, actions }: { folder: Folder; shut: boolean; pad: number; onPress: () => void; actions?: Actions }) {
+interface FolderProps {
+  folder: Folder;
+  shut: boolean;
+  pad: number;
+  onPress: () => void;
+  onChevron?: () => void; // given, the chevron is pressed apart from the rest of the row
+  actions?: Actions;
+}
+
+function FolderRow({ folder, shut, pad, onPress, onChevron, actions }: FolderProps) {
   const { c, small } = useHost();
   const line = useLine();
   const inside = everyFile(folder);
   return (
     <Pressable accessibilityRole="button" accessibilityLabel={`Folder ${folder.path}`} accessibilityState={{ expanded: !shut }} onPress={onPress} style={[line, { paddingLeft: pad }]}>
-      <Icon icon={shut ? codicon.chevronRight : codicon.chevronDown} size={small + 5} color={c.foregroundMuted} />
+      <Chevron folded={shut} label={`folder ${folder.path}`} onPress={onChevron} />
       <Icon icon={shut ? codicon.folder : codicon.folderOpened} size={small + 5} color={c.foregroundMuted} />
       <T lines={1} style={{ flex: 1, minWidth: 0 }}>
         {folder.name.replaceAll("/", " / ")}

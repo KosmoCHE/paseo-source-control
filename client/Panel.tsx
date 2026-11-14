@@ -32,7 +32,7 @@ const viewSchema = z.object({
   sizes: sizesSchema,
 });
 type ViewState = z.infer<typeof viewSchema>;
-const VIEW: ViewState = { scope: "all", folded: [], selected: null, parent: false, sizes: { repositories: null, changes: null } };
+const VIEW: ViewState = { scope: "all", folded: [], selected: null, parent: false, sizes: { changes: null } };
 
 export function Panel({ theme, layout, workspaceId, tab }: PluginWorkspacePanelProps) {
   const directory = useWorkspace(workspaceId, (workspace) => workspace.directory);

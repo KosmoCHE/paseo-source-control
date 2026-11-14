@@ -1,5 +1,5 @@
-// What every part of the panel is built from. Colours come from the host's theme, save the two VS Code
-// gives the graph's upstream and base branches, which the theme has no match for (see Graph.tsx).
+// What every part of the panel is built from. Colours come from the host's theme, save those VS Code gives
+// where the theme has no match: the graph's upstream and base branches, and the shadow under kept rows.
 
 import type { PluginHostProps } from "@getpaseo/plugin/client";
 import { Icon } from "@getpaseo/plugin/client/ui";
@@ -33,6 +33,18 @@ interface TProps {
   lines?: number;
   selectable?: boolean;
   style?: StyleProp<TextStyle>;
+}
+
+/**
+ * Whether a theme colour is dark: the theme names no appearance, only colours, and VS Code's own colours, which the
+ * panel borrows where the theme has none, differ for dark and light. Paseo's colours come as #rrggbb.
+ */
+export function isDark(color: string) {
+  const hex = /^#([0-9a-f]{6}|[0-9a-f]{3})$/i.exec(color)?.[1];
+  if (!hex) throw new Error(`A theme colour is not #rrggbb or #rgb: ${color}`);
+  const full = hex.length === 3 ? [...hex].map((digit) => digit + digit).join("") : hex;
+  const [r, g, b] = [0, 2, 4].map((at) => parseInt(full.slice(at, at + 2), 16) / 255);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.5;
 }
 
 /** The list with `item` taken out if it is in it, and put in if it is not. */
@@ -199,11 +211,12 @@ interface HeadingProps {
   onFold: () => void;
   count?: number; // how many things it holds
   group?: boolean; // the title of a group of changes inside a section: as VS Code draws it, a step in and in plain text
+  onChevron?: () => void; // given, the chevron is pressed apart from the rest of the title
   children?: ReactNode; // its actions
 }
 
 /** The title bar of something that folds: a section of the panel, or a group of changes. */
-export function Heading({ title, folded, onFold, count, group, children }: HeadingProps) {
+export function Heading({ title, folded, onFold, count, group, onChevron, children }: HeadingProps) {
   const { c, row, small } = useHost();
   return (
     <Pressable
@@ -213,7 +226,7 @@ export function Heading({ title, folded, onFold, count, group, children }: Headi
       onPress={onFold}
       style={{ flexDirection: "row", alignItems: "center", gap: 4, height: row, paddingLeft: group ? 12 : 8, paddingRight: 8 }}
     >
-      <Icon icon={folded ? codicon.chevronRight : codicon.chevronDown} size={small + 5} color={c.foregroundMuted} />
+      <Chevron folded={folded} label={title} onPress={onChevron} />
       {group ? (
         <T lines={1} style={{ flex: 1, minWidth: 0 }}>
           {title}
@@ -229,6 +242,18 @@ export function Heading({ title, folded, onFold, count, group, children }: Headi
           {String(count)}
         </T>
       )}
+    </Pressable>
+  );
+}
+
+/** The arrow that says whether a row is folded. With `onPress`, pressing it is apart from pressing the row. */
+export function Chevron({ folded, label, onPress }: { folded: boolean; label: string; onPress?: () => void }) {
+  const { c, small } = useHost();
+  const icon = <Icon icon={folded ? codicon.chevronRight : codicon.chevronDown} size={small + 5} color={c.foregroundMuted} />;
+  if (!onPress) return icon;
+  return (
+    <Pressable accessibilityRole="button" accessibilityLabel={`${folded ? "Expand" : "Collapse"} ${label}`} hitSlop={4} onPress={onPress}>
+      {icon}
     </Pressable>
   );
 }

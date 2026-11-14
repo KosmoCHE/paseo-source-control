@@ -17,7 +17,7 @@ import { FileTree } from "./Files";
 import { key, useCommand } from "./git";
 import { width } from "./lanes";
 import type { Rail } from "./lanes";
-import { IconButton, Notice, T, Tint, useHint, useHost } from "./ui";
+import { IconButton, Notice, T, Tint, isDark, useHint, useHost } from "./ui";
 
 const LANE = 12; // between two lanes
 const LINE = 2;
@@ -31,15 +31,6 @@ const railWidth = (lanes: number[]) => laneX(Math.min(width(lanes), MOST) - 1) +
 // so these are VS Code's own values: for the upstream, its dark or its light one by the panel's background.
 const UPSTREAM = { dark: "#B180D7", light: "#652D90" };
 const BASE = "#EA5C00";
-
-/** Whether a theme colour is dark. The theme names no appearance, only colours, and they come as #rrggbb. */
-function isDark(color: string) {
-  const hex = /^#([0-9a-f]{6}|[0-9a-f]{3})$/i.exec(color)?.[1];
-  if (!hex) throw new Error(`A theme colour is not #rrggbb or #rgb: ${color}`);
-  const full = hex.length === 3 ? [...hex].map((digit) => digit + digit).join("") : hex;
-  const [r, g, b] = [0, 2, 4].map((at) => parseInt(full.slice(at, at + 2), 16) / 255);
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.5;
-}
 
 /**
  * The refs the graph colours, as VS Code does: the checked-out branch, its upstream, and the branch it was made from;
