@@ -66,17 +66,16 @@ function Diff({ request }: { request: DiffRequest }) {
   );
 }
 
-/** VS Code's default diff colours: the theme has none of its own. Changed text is drawn over its line's colour. */
+/**
+ * The diff colours of VS Code 1.142's default themes, Dark 2026 and Light 2026: the host's theme has none of its own.
+ * Light 2026 sets only the colours of changed text; its lines take the colours VS Code registers. Changed text is drawn
+ * over its line's colour.
+ */
 function useColours() {
   const { c } = useHost();
-  const dark = isDark(c.surface0);
-  return {
-    insertedLine: "rgba(155, 185, 85, 0.2)",
-    removedLine: "rgba(255, 0, 0, 0.2)",
-    insertedText: dark ? "#9ccc2c33" : "#9ccc2c40",
-    removedText: "#ff000033",
-    filler: dark ? "#cccccc33" : "#22222233", // diffEditor.diagonalFill, where one side has no line
-  };
+  return isDark(c.surface0)
+    ? { insertedLine: "#347d3926", insertedText: "#57ab5a4d", removedLine: "#c93c3726", removedText: "#f470674d", filler: "#cccccc33" }
+    : { insertedLine: "rgba(155, 185, 85, 0.2)", insertedText: "#587c0c26", removedLine: "rgba(255, 0, 0, 0.2)", removedText: "#ad070726", filler: "#22222233" };
 }
 
 type Shown = Exclude<FileDiff, { kind: "binary" }>;
