@@ -3,7 +3,7 @@
 A [Paseo](https://paseo.sh) plugin that adds a Source Control panel to every workspace, modelled on the one in VS Code: the workspace's repositories, the selected repository's working tree, and its commit graph. Each scrolls on its own, the lines between them drag to resize them, and the repository list and the graph fold from their title bars.
 
 - **Repositories**: the repositories VS Code would list for the workspace's folder. Each shows its branch marked as VS Code marks it, `*` for changed or untracked files, `+` for staged ones and `!` while a merge or rebase is under way, with the branch icon to match; and, when it differs from its upstream, the commits to pull and to push (`2↓ 1↑`). Selecting one shows it in the rest of the panel.
-- **Changes**: commit message, the Commit button, and the staged files, changed files and files in conflict as trees of folders. Stage, unstage and discard a file or everything in a folder; stage or unstage everything from the group's title. The arrow at the right of the Commit button opens the other ways to commit: **Commit (Amend)** folds what is staged into the last commit, and rewords it when a message is written.
+- **Changes**: commit message, the Commit button, and the staged files, changed files and files in conflict as trees of folders. Stage, unstage and discard a file or everything in a folder; stage or unstage everything from the group's title. **Open File** opens a changed file in Paseo's own file tab, as its file tree does. The arrow at the right of the Commit button opens the other ways to commit: **Commit (Amend)** folds what is staged into the last commit, and rewords it when a message is written.
 - **Graph**: one row per commit with its lanes, merges, branch names, remote branches and tags. The scope switch shows all branches (`All`, the default) or the checked-out branch with its upstream (`Auto`). Selecting a commit shows its message and its changed files, as a tree too. Fetch, pull and push sit in the title bar.
 - **Diff**: selecting a file opens its diff in a workspace tab.
 
@@ -63,6 +63,8 @@ client/Split.tsx        the three sections and the lines that resize them
 client/lanes.ts    gives every commit a lane
 client/Graph.tsx   draws the graph rows
 client/Changes.tsx the working tree part
+client/openFile.tsx opens a file in Paseo's file tab
+client/fileLink.ts the link it opens the file with
 client/tree.ts     arranges changed files as a tree of folders
 client/Files.tsx   draws that tree
 client/codicons.ts the icons taken from VS Code
@@ -90,5 +92,6 @@ The panel's icons are VS Code's own, from [vscode-codicons](https://github.com/m
 
 - The graph draws at most ten lanes side by side; lanes further right are cut off.
 - Diffs are plain text, without syntax colours or line numbers.
+- Open File is offered on the desktop and in a browser only. A plugin has no call yet to open a file in Paseo's file tab, so the panel presses a hidden Markdown link to the file instead, which needs a web page ([issue #1](https://github.com/KosmoCHE/paseo-source-control/issues/1)).
 - Fetch, pull and push run with the daemon's git credentials and cannot answer a password prompt.
 - Switching and creating branches is left to the agents: the panel has no such actions.

@@ -9,6 +9,21 @@ export function Icon({ icon, size = 24, color }: { icon: { svg: string }; size?:
   return <span style={{ display: "flex", color }} dangerouslySetInnerHTML={{ __html: icon.svg.replace('width="16" height="16"', `width="${size}" height="${size}"`) }} />;
 }
 
+/** Paseo's Markdown, for the one link the panel draws: a press says which file Paseo would open. */
+export function Markdown({ children }: { children: string }) {
+  const link = /^\[(.*)\]\((.*)\)$/.exec(children);
+  if (!link) throw new Error(`The preview's Markdown draws a single link only: ${children}`);
+  const open = (event: { preventDefault(): void }) => {
+    event.preventDefault();
+    say(`Paseo would open ${decodeURIComponent(new URL(link[2], "http://paseo.invalid").pathname)}`);
+  };
+  return (
+    <a href={link[2]} onClick={open}>
+      {link[1]}
+    </a>
+  );
+}
+
 export function Loading() {
   return <Text style={{ padding: 12, color: "gray" }}>Loading…</Text>;
 }

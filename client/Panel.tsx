@@ -15,6 +15,7 @@ import { Changes } from "./Changes";
 import { key, useStatus } from "./git";
 import { CommitItem, GraphHeader } from "./Graph";
 import { layout as lanes } from "./lanes";
+import { FileOpener } from "./openFile";
 import { Repositories } from "./Repositories";
 import { Split, sizesSchema } from "./Split";
 import { HostProvider, Notice, PanelRoot, T, useHost } from "./ui";
@@ -37,7 +38,9 @@ export function Panel({ theme, layout, workspaceId, tab }: PluginWorkspacePanelP
   const host = useMemo(() => ({ theme, layout }), [theme, layout]);
   return (
     <HostProvider value={host}>
-      <PanelRoot>{directory === null ? <Notice>This workspace is unavailable.</Notice> : <Workspace key={directory} directory={directory} workspaceId={workspaceId} tab={tab} />}</PanelRoot>
+      <PanelRoot>
+        <FileOpener>{directory === null ? <Notice>This workspace is unavailable.</Notice> : <Workspace key={directory} directory={directory} workspaceId={workspaceId} tab={tab} />}</FileOpener>
+      </PanelRoot>
     </HostProvider>
   );
 }

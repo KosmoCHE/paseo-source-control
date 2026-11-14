@@ -27,8 +27,8 @@ interface Props {
   files: FileChange[];
   indent: number; // where the top level starts
   onOpen: (file: FileChange) => void;
-  /** The buttons of one row: for a file, or for everything in a folder. `path` names the row. */
-  actions?: (files: FileChange[], path: string) => ReactNode;
+  /** The buttons of one row: for a file, or for everything in a folder. `path` names the row, `file` is the row's file, null for a folder's. */
+  actions?: (files: FileChange[], path: string, file: FileChange | null) => ReactNode;
 }
 
 export function FileTree({ files, indent, onOpen, actions }: Props) {
@@ -55,7 +55,7 @@ export function FileTree({ files, indent, onOpen, actions }: Props) {
           <T lines={1} style={{ flex: 1, minWidth: 0 }}>
             {child.name.replaceAll("/", " / ")}
           </T>
-          {actions?.(inside, child.path)}
+          {actions?.(inside, child.path, null)}
           {/* A dot for "something in here changed", in the colour of the most pressing change. */}
           <View style={{ width: 12, alignItems: "center" }}>
             <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: inside.some((file) => file.status === "U") ? c.statusDanger : inside.every((file) => "A?".includes(file.status)) ? c.statusSuccess : c.statusWarning }} />
@@ -82,7 +82,7 @@ export function FileTree({ files, indent, onOpen, actions }: Props) {
           <T size={small} color={c.foregroundMuted} lines={1} style={{ flex: 1, flexShrink: 1000, minWidth: 0 }}>
             {file.from ? `← ${file.from}` : ""}
           </T>
-          {actions?.([file], file.path)}
+          {actions?.([file], file.path, file)}
           <T size={small} weight="600" color={color} style={{ width: 12, textAlign: "center" }}>
             {letter}
           </T>

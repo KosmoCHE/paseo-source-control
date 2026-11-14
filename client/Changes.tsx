@@ -10,6 +10,7 @@ import * as codicon from "./codicons";
 import { showDiff } from "./diffTab";
 import { FileTree } from "./Files";
 import { useCommand } from "./git";
+import { useOpenFile } from "./openFile";
 import { Heading, IconButton, T, useHint, useHost, useMenu } from "./ui";
 import type { MenuItem } from "./ui";
 
@@ -71,7 +72,11 @@ export function Changes({ cwd, workspaceId, status, folded, onFold }: Props) {
         : `In ${path}, ${[changed && `the changes in ${count(changed, "file")} will be lost`, untracked && `${count(untracked, "untracked file")} will be deleted`].filter(Boolean).join(" and ")}.`;
     ask({ title: changed ? "Discard changes?" : files.length === 1 ? "Delete file?" : "Delete files?", text, yes: changed ? "Discard" : "Delete", run: () => discard.mutate({ files }) });
   };
-  const group = (title: string, files: FileChange[], source: DiffSource, all: ReactNode, each: (files: FileChange[], path: string) => ReactNode) => (
+  const openFile = useOpenFile();
+  /** VS Code's Open File, on a file that is there to open. */
+  const opener = (file: FileChange | null) =>
+    openFile && file && file.status !== "D" && <IconButton icon={codicon.goToFile} label={`Open ${file.path}`} hint="Open File" onPress={() => openFile(`${cwd}/${file.path}`)} />;
+  const group = (title: string, files: FileChange[], source: DiffSource, all: ReactNode, each: (files: FileChange[], path: string, file: FileChange | null) => ReactNode) => (
     <Group title={title} files={files} folded={folded.includes(title)} onFold={() => onFold(title)} onOpen={(file) => showDiff({ workspaceId, cwd, source, file })} all={all} each={each} />
   );
   return (
@@ -96,16 +101,22 @@ export function Changes({ cwd, workspaceId, status, folded, onFold }: Props) {
           ]}
         />
       </View>
-      {group("Merge Changes", status.conflicts, { kind: "changes" }, null, (files, path) => (
-        <IconButton icon={codicon.add} label={`Mark ${path} as resolved`} hint="Mark as resolved" onPress={() => stage.mutate({ files })} />
+      {group("Merge Changes", status.conflicts, { kind: "changes" }, null, (files, path, file) => (
+        <>
+          {opener(file)}
+          <IconButton icon={codicon.add} label={`Mark ${path} as resolved`} hint="Mark as resolved" onPress={() => stage.mutate({ files })} />
+        </>
       ))}
       {group(
         "Staged Changes",
         status.staged,
         { kind: "staged" },
         <IconButton icon={codicon.remove} label="Unstage all changes" onPress={() => unstage.mutate({ files: status.staged })} />,
-        (files, path) => (
-          <IconButton icon={codicon.remove} label={`Unstage ${path}`} hint="Unstage changes" onPress={() => unstage.mutate({ files })} />
+        (files, path, file) => (
+          <>
+            {opener(file)}
+            <IconButton icon={codicon.remove} label={`Unstage ${path}`} hint="Unstage changes" onPress={() => unstage.mutate({ files })} />
+          </>
         ),
       )}
       {group(
@@ -113,8 +124,9 @@ export function Changes({ cwd, workspaceId, status, folded, onFold }: Props) {
         status.changes,
         { kind: "changes" },
         <IconButton icon={codicon.add} label="Stage all changes" onPress={() => stage.mutate({ files: status.changes })} />,
-        (files, path) => (
+        (files, path, file) => (
           <>
+            {opener(file)}
             <IconButton icon={codicon.discard} label={`Discard changes in ${path}`} hint="Discard changes" onPress={() => drop(files, path)} />
             <IconButton icon={codicon.add} label={`Stage ${path}`} hint="Stage changes" onPress={() => stage.mutate({ files })} />
           </>
@@ -185,7 +197,7 @@ interface GroupProps {
   onFold: () => void;
   onOpen: (file: FileChange) => void;
   all: ReactNode; // an action on the whole group
-  each: (files: FileChange[], path: string) => ReactNode; // the actions on one row: a file, or the files in a folder
+  each: (files: FileChange[], path: string, file: FileChange | null) => ReactNode; // the actions on one row: a file, or the files in a folder
 }
 
 /** A titled tree of files. An empty group is not shown at all. */
