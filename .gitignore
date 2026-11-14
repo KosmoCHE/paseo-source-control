@@ -1,2 +1,4 @@
 node_modules/
 preview/dist/
+# Throwaway repositories and files for trying the panel in the preview
+tmp/
