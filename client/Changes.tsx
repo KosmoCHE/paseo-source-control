@@ -95,7 +95,8 @@ export function Changes({ cwd, workspaceId, status, folded, onFold }: Props) {
           depth: 1,
           folded: shut[title] ?? [],
           onFold: (path) => setShut({ ...shut, [title]: toggle(shut[title] ?? [], path) }),
-          onOpen: (file) => showDiff({ workspaceId, cwd, source, file }),
+          // An untracked file has nothing to be compared with: as in VS Code, it opens as itself, where Paseo can open files.
+          onOpen: (file) => (openFile && file.status === "?" ? openFile(`${cwd}/${file.path}`) : showDiff({ workspaceId, cwd, source, file })),
           actions: each,
         })
       : [];
