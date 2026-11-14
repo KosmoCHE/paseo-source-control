@@ -46,7 +46,7 @@ paseo plugin install "$(pwd)"
 
 Open a workspace: **Source Control** is available as an explorer tab and as a workspace tab.
 
-The daemon half has one runtime dependency, `strip-json-comments`; the manifest's `build` step installs it when Paseo installs the plugin from Git.
+The daemon half has two runtime dependencies, `strip-json-comments` and `vscode-diff`; the manifest's `build` step installs them when Paseo installs the plugin from Git.
 
 After changing the code, `paseo plugin reload source-control` compiles it again. `paseo plugin ls source-control --json` shows a compile error, `paseo plugin logs source-control` the daemon half's output.
 
@@ -84,6 +84,8 @@ A plugin's client cannot import an SVG library, and inline SVG is accepted for i
 
 ## Development
 
+What the panel follows, and where it differs from VS Code and why, is in [docs/design.md](docs/design.md).
+
 ```bash
 npm run typecheck
 npm test
@@ -97,7 +99,7 @@ The panel's icons are VS Code's own, from [vscode-codicons](https://github.com/m
 ## Limits
 
 - The graph draws at most ten lanes side by side; lanes further right are cut off.
-- Diffs are plain text, without syntax colours or line numbers.
+- Diffs have no syntax colours.
 - Open File is offered on the desktop and in a browser only. A plugin has no call yet to open a file in Paseo's file tab, so the panel presses a hidden Markdown link to the file instead, which needs a web page ([issue #1](https://github.com/KosmoCHE/paseo-source-control/issues/1)).
 - Fetch, pull, push and the fetch every three minutes run with the daemon's git credentials and cannot answer a password prompt.
 - Switching and creating branches is left to the agents: the panel has no such actions.
