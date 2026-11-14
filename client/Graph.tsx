@@ -12,6 +12,7 @@ import { Pressable, View } from "react-native";
 import type { ViewStyle } from "react-native";
 import { compareRpc, showRpc, syncRpc } from "../shared/git";
 import type { Ref, Scope } from "../shared/git";
+import { ago } from "./ago";
 import * as codicon from "./codicons";
 import { showDiff } from "./diffTab";
 import { FileTree } from "./Files";
@@ -19,7 +20,7 @@ import { key, useCommand } from "./git";
 import { width } from "./lanes";
 import type { Rail } from "./lanes";
 import type { Pending, Row } from "./pending";
-import { IconButton, Notice, T, Tint, isDark, useHint, useHost } from "./ui";
+import { IconButton, Notice, T, Tint, isDark, useHint, useHost, useHoverCard } from "./ui";
 
 const LANE = 12; // between two lanes
 const LINE = 2;
@@ -116,7 +117,8 @@ function Rails({ rail, height, kind }: { rail: Rail; height: number; kind: "comm
   );
 }
 
-function Badges({ refs, rail, followed }: { refs: Ref[]; rail: Rail; followed: Followed }) {
+/** On a row, the refs the graph colours; on a commit's card, as in VS Code's hover, every ref, the others plain. */
+function Badges({ refs, rail, followed, card }: { refs: Ref[]; rail: Rail; followed: Followed; card?: boolean }) {
   const { c, small } = useHost();
   const paint = usePaint();
   const colour = (ref: Ref) => {
@@ -125,20 +127,20 @@ function Badges({ refs, rail, followed }: { refs: Ref[]; rail: Rail; followed: F
     if (ref.kind === "remote" && ref.name === followed.base) return BASE;
     return followed.all ? paint(rail.col) : null;
   };
+  // On a coloured badge VS Code writes in the panel's background colour; the checked-out branch keeps the theme's pair.
   const shown = refs.flatMap((ref) => {
     const fill = colour(ref);
-    return fill ? [{ ref, fill }] : [];
+    if (fill) return [{ ref, fill, ink: ref.kind === "head" ? c.accentForeground : c.surface0 }];
+    return card ? [{ ref, fill: c.surface2, ink: c.foreground }] : [];
   });
   if (!shown.length) return null;
   const local = new Set(shown.filter(({ ref }) => ref.kind !== "remote" && ref.kind !== "tag").map(({ ref }) => ref.name));
   const icon = { head: codicon.target, branch: codicon.gitBranch, remote: codicon.cloud, tag: codicon.tag };
   return (
-    <View style={{ flexDirection: "row", flexShrink: 0, maxWidth: "55%", gap: 4, marginLeft: 6, overflow: "hidden" }}>
-      {shown.map(({ ref, fill }) => {
-        // On a coloured badge VS Code writes in the panel's background colour; the checked-out branch keeps the theme's pair.
-        const ink = ref.kind === "head" ? c.accentForeground : c.surface0;
-        // A remote branch sitting on its local branch says nothing new by name: VS Code shows a bare cloud.
-        const mirror = ref.kind === "remote" && local.has(ref.name.slice(ref.name.indexOf("/") + 1));
+    <View style={card ? { flexDirection: "row", flexWrap: "wrap", gap: 4 } : { flexDirection: "row", flexShrink: 0, maxWidth: "55%", gap: 4, marginLeft: 6, overflow: "hidden" }}>
+      {shown.map(({ ref, fill, ink }) => {
+        // On a row, a remote branch sitting on its local branch says nothing new by name: VS Code shows a bare cloud.
+        const mirror = !card && ref.kind === "remote" && local.has(ref.name.slice(ref.name.indexOf("/") + 1));
         return (
           <View
             key={ref.kind + ref.name}
@@ -173,9 +175,12 @@ export function CommitItem({ cwd, workspaceId, commit, rail, followed, open, onT
   const { c, row, small } = useHost();
   const head = commit.refs.some((ref) => ref.kind === "head");
   const kind = commit.pending ? "pending" : head ? "head" : commit.parents.length > 1 ? "merge" : "commit";
+  // As in VS Code, a commit's message and the rest show on a card; the changes to pull or push have none.
+  const hover = useHoverCard(() => <CommitCard cwd={cwd} commit={commit} rail={rail} followed={followed} />);
   return (
     <View>
       <Pressable
+        {...(commit.pending ? {} : hover)}
         accessibilityRole="button"
         accessibilityLabel={`${commit.subject}, ${commit.author}`}
         accessibilityState={{ expanded: open }}
@@ -199,26 +204,55 @@ export function CommitItem({ cwd, workspaceId, commit, rail, followed, open, onT
   );
 }
 
+/** As in VS Code, an open commit lists the files it changed. */
 function Details({ cwd, workspaceId, commit, rail }: Pick<ItemProps, "cwd" | "workspaceId" | "commit" | "rail">) {
+  const detail = useCommit(cwd, commit.hash);
+  return (
+    <Under rail={rail}>
+      {detail.error ? (
+        <Notice failed>{detail.error.message}</Notice>
+      ) : !detail.data ? (
+        <Loading />
+      ) : (
+        <FileTree files={detail.data.files} indent={0} onOpen={(file) => showDiff({ workspaceId, cwd, source: { kind: "commit", hash: commit.hash }, file })} />
+      )}
+    </Under>
+  );
+}
+
+/** A commit's message, files and how much it changed. Read once: a commit never changes. */
+function useCommit(cwd: string, hash: string) {
+  const read = useRpc(showRpc);
+  return useQuery({ queryKey: key("show", cwd, hash), queryFn: () => read({ cwd, hash }), staleTime: Infinity });
+}
+
+/** What VS Code's hover over a commit shows: who made it and when, its message, how much it changed, its refs and its hash. */
+function CommitCard({ cwd, commit, rail, followed }: Pick<ItemProps, "cwd" | "commit" | "rail" | "followed">) {
   const { c, small } = useHost();
   const toast = useToast();
-  const read = useRpc(showRpc);
-  const detail = useQuery({ queryKey: key("show", cwd, commit.hash), queryFn: () => read({ cwd, hash: commit.hash }), staleTime: Infinity });
+  const detail = useCommit(cwd, commit.hash);
+  const when = commit.time * 1000;
+  const date = new Date(when).toLocaleString("en-US", { year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "numeric" });
+  const icon = small + 3;
+  const line = icon + 6; // the first line of the author's row, which its icons sit in the middle of
+  const rule = <View style={{ height: 1, backgroundColor: c.border }} />;
   const copy = () =>
     copyText(commit.hash).then(
       () => toast.show("Commit hash copied", { variant: "success" }),
       (error: Error) => toast.error(error.message),
     );
   return (
-    <Under rail={rail}>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingRight: 8 }}>
-        <T mono size={small} color={c.foregroundMuted}>
-          {commit.hash.slice(0, 10)}
-        </T>
-        <IconButton icon={codicon.copy} label="Copy commit hash" onPress={copy} />
-        <T size={small} color={c.foregroundMuted} lines={1} style={{ flex: 1, minWidth: 0, textAlign: "right" }}>
-          {`${commit.author} · ${new Date(commit.time * 1000).toLocaleString()}`}
-        </T>
+    <View style={{ gap: 8 }}>
+      {/* The time wraps in its own column, so that its icon stays in front of it. */}
+      <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 4 }}>
+        <View style={{ height: line, justifyContent: "center" }}>
+          <Icon icon={codicon.account} size={icon} color={c.foreground} />
+        </View>
+        <T weight="600" style={{ lineHeight: line }}>{`${commit.author},`}</T>
+        <View style={{ height: line, justifyContent: "center" }}>
+          <Icon icon={codicon.history} size={icon} color={c.foreground} />
+        </View>
+        <T style={{ flexShrink: 1, lineHeight: line }}>{`${ago(when)} (${date})`}</T>
       </View>
       {detail.error ? (
         <Notice failed>{detail.error.message}</Notice>
@@ -226,27 +260,53 @@ function Details({ cwd, workspaceId, commit, rail }: Pick<ItemProps, "cwd" | "wo
         <Loading />
       ) : (
         <>
-          <T size={small + 1} selectable style={{ paddingRight: 8 }}>
-            {detail.data.message}
-          </T>
-          <FileTree files={detail.data.files} indent={0} onOpen={(file) => showDiff({ workspaceId, cwd, source: { kind: "commit", hash: commit.hash }, file })} />
+          <T selectable>{detail.data.message}</T>
+          {rule}
+          {detail.data.stats.files > 0 && (
+            <>
+              <Stats {...detail.data.stats} />
+              {rule}
+            </>
+          )}
         </>
       )}
-    </Under>
+      {commit.refs.length > 0 && (
+        <>
+          <Badges refs={commit.refs} rail={rail} followed={followed} card />
+          {rule}
+        </>
+      )}
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+        <Icon icon={codicon.gitCommit} size={icon} color={c.foregroundMuted} />
+        <T mono size={small}>
+          {commit.hash.slice(0, 7)}
+        </T>
+        <IconButton icon={codicon.copy} label="Copy Commit Hash" onPress={copy} />
+      </View>
+    </View>
+  );
+}
+
+/** "3 files changed, 7 insertions(+), 1 deletion(-)", in VS Code's words and colours, leaving out a count of nothing. */
+function Stats({ files, insertions, deletions }: { files: number; insertions: number; deletions: number }) {
+  const { c } = useHost();
+  const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
+  return (
+    <T>
+      {`${plural(files, "file")} changed`}
+      {insertions > 0 && <T color={c.statusSuccess}>{`, ${plural(insertions, "insertion")}(+)`}</T>}
+      {deletions > 0 && <T color={c.statusDanger}>{`, ${plural(deletions, "deletion")}(-)`}</T>}
+    </T>
   );
 }
 
 /** The files the changes to pull or to push touch, from where the branch and its upstream parted. */
 function PendingDetails({ cwd, workspaceId, pending, rail }: Pick<ItemProps, "cwd" | "workspaceId" | "rail"> & { pending: Pending }) {
-  const { c, small } = useHost();
   const read = useRpc(compareRpc);
   const { from, to } = pending;
   const files = useQuery({ queryKey: key("compare", cwd, from, to), queryFn: () => read({ cwd, from, to }), staleTime: Infinity });
   return (
     <Under rail={rail}>
-      <T size={small} color={c.foregroundMuted} lines={1} style={{ paddingRight: 8 }}>
-        {pending.title}
-      </T>
       {files.error ? (
         <Notice failed>{files.error.message}</Notice>
       ) : !files.data ? (

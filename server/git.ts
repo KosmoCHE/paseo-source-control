@@ -287,11 +287,18 @@ export function parseNameStatus(out: string): FileChange[] {
 const AS_PATCH = ["--diff-merges=first-parent", "--format=", "--find-renames"];
 
 export async function show({ cwd, hash }: RpcInput<typeof showRpc>): Promise<RpcOutput<typeof showRpc>> {
-  const [message, files] = await Promise.all([
+  const [message, files, stats] = await Promise.all([
     git(cwd, ["show", "--no-patch", "--format=%B", hash]),
     git(cwd, ["show", ...AS_PATCH, "--name-status", "-z", hash]),
+    git(cwd, ["show", ...AS_PATCH, "--shortstat", hash]),
   ]);
-  return { message: message.trim(), files: parseNameStatus(files) };
+  return { message: message.trim(), files: parseNameStatus(files), stats: parseShortStat(stats) };
+}
+
+/** Reads `--shortstat`, " 3 files changed, 7 insertions(+), 1 deletion(-)", which leaves out a count of nothing. */
+export function parseShortStat(out: string) {
+  const count = (pattern: RegExp) => Number(pattern.exec(out)?.[1] ?? 0);
+  return { files: count(/(\d+) files? changed/), insertions: count(/(\d+) insertions?\(\+\)/), deletions: count(/(\d+) deletions?\(-\)/) };
 }
 
 export async function compare({ cwd, from, to }: RpcInput<typeof compareRpc>): Promise<RpcOutput<typeof compareRpc>> {

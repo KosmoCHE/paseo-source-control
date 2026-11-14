@@ -8,7 +8,6 @@ export interface Pending {
   kind: "incoming" | "outgoing";
   from: string; // the commit HEAD and its upstream share
   to: string; // the upstream's commit, or HEAD
-  title: string; // "main ↔ origin/main", as VS Code titles the changes
 }
 
 /** A row of the graph: a commit, or one of the two rows of pending changes. */
@@ -33,14 +32,14 @@ export function withPending(commits: Commit[], sync: Sync, names: Names): Row[] 
     const at = index(sync.base);
     if (last && at !== -1) {
       rows[index(last.hash)] = { ...last, parents: ["incoming", ...last.parents.slice(1)] };
-      const pending: Pending = { kind: "incoming", from: sync.base, to: sync.upstream, title: `${names.branch} ↔ ${names.upstream}` };
+      const pending: Pending = { kind: "incoming", from: sync.base, to: sync.upstream };
       rows.splice(at, 0, { hash: "incoming", parents: [sync.base], author: names.upstream, time: 0, subject: "Incoming Changes", refs: [], pending });
     }
   }
   if (sync.head !== sync.base) {
     const at = index(sync.head);
     if (at !== -1) {
-      const pending: Pending = { kind: "outgoing", from: sync.base, to: sync.head, title: `${names.upstream} ↔ ${names.branch}` };
+      const pending: Pending = { kind: "outgoing", from: sync.base, to: sync.head };
       rows.splice(at, 0, { hash: "outgoing", parents: [sync.head], author: names.branch, time: 0, subject: "Outgoing Changes", refs: [], pending });
     }
   }

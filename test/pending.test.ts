@@ -18,8 +18,8 @@ test("Incoming Changes above the shared commit on the upstream's line, Outgoing 
     rows.map(({ hash, parents }) => `${hash}<${parents.join(",")}`),
     ["U2<U1", "outgoing<H2", "H2<H1", "U1<incoming", "H1<B", "incoming<B", "B<R", "R<"],
   );
-  assert.deepEqual(rows[5].pending, { kind: "incoming", from: "B", to: "U2", title: "main ↔ origin/main" });
-  assert.deepEqual(rows[1].pending, { kind: "outgoing", from: "B", to: "H2", title: "origin/main ↔ main" });
+  assert.deepEqual(rows[5].pending, { kind: "incoming", from: "B", to: "U2" });
+  assert.deepEqual(rows[1].pending, { kind: "outgoing", from: "B", to: "H2" });
   assert.equal(rows[5].author, "origin/main");
   // The row sits on the upstream's lane, which then joins the branch at the shared commit.
   const rails = layout(rows);

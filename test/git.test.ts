@@ -157,6 +157,9 @@ test("history carries parents and refs, and a merge shows what it brought in", a
   const merge = await show({ cwd, hash: all.commits[1].hash });
   assert.equal(merge.message, "merge side");
   assert.deepEqual(merge.files, [{ path: "side.txt", status: "A" }]);
+  // Counted as the files are, against the first parent; a count of nothing is zero.
+  assert.deepEqual(merge.stats, { files: 1, insertions: 1, deletions: 0 });
+  assert.deepEqual((await show({ cwd, hash: all.commits[2].hash })).stats, { files: 1, insertions: 1, deletions: 0 });
   const patch = await diff({ cwd, source: { kind: "commit", hash: all.commits[1].hash }, file: merge.files[0] });
   assert.match(patch.diff, /^\+side$/m);
 

@@ -5,7 +5,7 @@ import type { PluginHostProps } from "@getpaseo/plugin/client";
 import { Icon } from "@getpaseo/plugin/client/ui";
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Pressable, ScrollView, Text, View } from "react-native";
 import type { StyleProp, TextStyle } from "react-native";
 import * as codicon from "./codicons";
 import type { Codicon } from "./codicons";
@@ -69,7 +69,7 @@ export function Tint({ color, opacity }: { color: string; opacity: number }) {
   return <View style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0, backgroundColor: color, opacity, pointerEvents: "none" }} />;
 }
 
-// --- what floats over the panel: hints and menus -----------------------------------
+// --- what floats over the panel: hints, menus and cards ---------------------------
 
 export interface MenuItem {
   label: string;
@@ -88,55 +88,93 @@ interface Floating {
   hint(button: View, text: string): void;
   unhint(): void;
   menu(button: View, items: MenuItem[]): void;
+  card(row: View, content: ReactNode, pinned: boolean): void; // pinned: until something else is pressed
+  uncard(): void; // the pointer has left the row: in a moment, unless it is on the card or comes back first
+  keep(): void; // the pointer is back on the row
 }
 const FloatingContext = createContext<Floating | null>(null);
 
 function useFloating() {
   const floating = useContext(FloatingContext);
-  if (!floating) throw new Error("Hints and menus need a PanelRoot above them");
+  if (!floating) throw new Error("Hints, menus and cards need a PanelRoot above them");
   return floating;
 }
 
-/** The panel's root. Hints and menus are drawn here, over everything else, so that no list can cut them off. */
+/**
+ * The panel's root. Hints, menus and cards are drawn here, over everything else, so that no list can cut them off. A menu
+ * or a card shows one at a time; a hint shows over either, for the buttons on a card.
+ */
 export function PanelRoot({ children }: { children: ReactNode }) {
   const { c, small, row } = useHost();
   const root = useRef<View>(null);
-  const [shown, show] = useState<(Place & ({ hint: string } | { menu: MenuItem[] })) | null>(null);
-  const floating = useMemo(() => {
+  const [hint, setHint] = useState<(Place & { text: string }) | null>(null);
+  const [shown, show] = useState<(Place & ({ menu: MenuItem[] } | { card: ReactNode; pinned: boolean })) | null>(null);
+  const leaving = useRef<ReturnType<typeof setTimeout>>(undefined);
+  // React tells of the pointer coming onto the card before the row hears it leave, so the card remembers it.
+  const onCard = useRef(false);
+  useEffect(() => () => clearTimeout(leaving.current), []);
+  const floating = useMemo<Floating>(() => {
     const locate = (button: View, then: (place: Place) => void) =>
       root.current?.measureInWindow((left, top, width, height) => button.measureInWindow((x, y, w, h) => then({ x: x - left, y: y - top, width: w, height: h, panel: { width, height } })));
-    // A menu stays until it is answered: the pointer leaving the button that opened it takes away a hint only.
+    const keep = () => clearTimeout(leaving.current);
     return {
-      hint: (button: View, text: string) => locate(button, (place) => show((shown) => (shown && "menu" in shown ? shown : { ...place, hint: text }))),
-      unhint: () => show((shown) => (shown && "hint" in shown ? null : shown)),
-      menu: (button: View, items: MenuItem[]) => locate(button, (place) => show({ ...place, menu: items })),
+      hint: (button, text) => locate(button, (place) => setHint({ ...place, text })),
+      unhint: () => setHint(null),
+      menu: (button, items) => locate(button, (place) => show({ ...place, menu: items })),
+      // A card does not take the place of an open menu, and only a pinned card stays when the pointer leaves it.
+      card: (row, content, pinned) =>
+        locate(row, (place) => {
+          keep();
+          onCard.current = false;
+          show((shown) => (shown && "menu" in shown ? shown : { ...place, card: content, pinned }));
+        }),
+      uncard: () => {
+        keep();
+        if (onCard.current) return;
+        leaving.current = setTimeout(() => show((shown) => (shown && "card" in shown && !shown.pinned ? null : shown)), 300);
+      },
+      keep,
     };
   }, []);
   // Under the button, or over it when there is no room below.
   const upright = (at: Place, needs: number) => (at.y + at.height + needs < at.panel.height ? { top: at.y + at.height + 4 } : { bottom: at.panel.height - at.y + 4 });
   const fromRight = (at: Place) => ({ right: Math.max(4, at.panel.width - at.x - at.width) });
+  // Under a row in the upper half of the panel, over one in the lower half, and as tall as the room on that side.
+  const beside = (at: Place) =>
+    at.y + at.height / 2 < at.panel.height / 2
+      ? { place: { top: at.y + at.height + 2 }, room: at.panel.height - at.y - at.height - 10 }
+      : { place: { bottom: at.panel.height - at.y + 2 }, room: at.y - 10 };
   const box = { position: "absolute", borderWidth: 1, borderColor: c.border } as const;
+  const fill = { position: "absolute", top: 0, right: 0, bottom: 0, left: 0 } as const;
   return (
     <FloatingContext.Provider value={floating}>
       <View ref={root} style={{ flex: 1, backgroundColor: c.surface0 }}>
         {children}
-        {shown && "hint" in shown && (
-          // A hint reaches towards the middle of the panel, and lets the pointer through.
-          <View
-            style={[
-              box,
-              { maxWidth: 260, paddingVertical: 3, paddingHorizontal: 7, borderRadius: 4, backgroundColor: c.surface2, pointerEvents: "none" },
-              shown.x + shown.width / 2 < shown.panel.width / 2 ? { left: Math.max(4, shown.x) } : fromRight(shown),
-              upright(shown, 28),
-            ]}
-          >
-            <T size={small}>{shown.hint}</T>
-          </View>
+        {shown && "card" in shown && (
+          <>
+            {shown.pinned && <Pressable accessibilityLabel="Close the card" onPress={() => show(null)} style={fill} />}
+            {/* Not a Pressable: its hover ends when the pointer comes onto a button inside it. */}
+            <View
+              onPointerEnter={() => {
+                onCard.current = true;
+                floating.keep();
+              }}
+              onPointerLeave={() => {
+                onCard.current = false;
+                floating.uncard();
+              }}
+              style={[box, { left: 8, right: 8, borderRadius: 6, backgroundColor: c.surface1 }, beside(shown).place]}
+            >
+              <ScrollView style={{ maxHeight: beside(shown).room }} contentContainerStyle={{ padding: 10 }}>
+                {shown.card}
+              </ScrollView>
+            </View>
+          </>
         )}
         {shown && "menu" in shown && (
           <>
             {/* Anything outside the menu closes it. */}
-            <Pressable accessibilityLabel="Close the menu" onPress={() => show(null)} style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0 }} />
+            <Pressable accessibilityLabel="Close the menu" onPress={() => show(null)} style={fill} />
             <View style={[box, { minWidth: 170, paddingVertical: 4, borderRadius: 6, backgroundColor: c.surface1 }, fromRight(shown), upright(shown, shown.menu.length * (row + 4) + 12)]}>
               {shown.menu.map((item) => (
                 <Pressable
@@ -156,6 +194,19 @@ export function PanelRoot({ children }: { children: ReactNode }) {
               ))}
             </View>
           </>
+        )}
+        {hint && (
+          // A hint reaches towards the middle of the panel, and lets the pointer through.
+          <View
+            style={[
+              box,
+              { maxWidth: 260, paddingVertical: 3, paddingHorizontal: 7, borderRadius: 4, backgroundColor: c.surface2, pointerEvents: "none" },
+              hint.x + hint.width / 2 < hint.panel.width / 2 ? { left: Math.max(4, hint.x) } : fromRight(hint),
+              upright(hint, 28),
+            ]}
+          >
+            <T size={small}>{hint.text}</T>
+          </View>
         )}
       </View>
     </FloatingContext.Provider>
@@ -185,6 +236,32 @@ export function useHint(text: string) {
 /** Opens a menu under a button: `open(button, items)`. Choosing an item, or pressing anywhere else, closes it. */
 export function useMenu() {
   return useFloating().menu;
+}
+
+/**
+ * Shows `card()` once the pointer has rested on a row, and keeps it while the pointer moves onto it, as VS Code's hovers
+ * do. Where there is no pointer, a long press shows it until something else is pressed. Spread the result into the row.
+ */
+export function useHoverCard(card: () => ReactNode) {
+  const floating = useFloating();
+  const ref = useRef<View>(null);
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const open = (pinned: boolean) => ref.current && floating.card(ref.current, card(), pinned);
+  const leave = () => {
+    clearTimeout(timer.current);
+    floating.uncard();
+  };
+  return {
+    ref,
+    onHoverIn: () => {
+      floating.keep();
+      timer.current = setTimeout(() => open(false), 500);
+    },
+    onHoverOut: leave,
+    onPressIn: leave,
+    onLongPress: () => open(true),
+  };
 }
 
 /** `hint` is what hovering shows; it is the label unless the label names a file. */

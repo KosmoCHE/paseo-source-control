@@ -96,7 +96,11 @@ export type Sync = z.infer<typeof logRpc.output>["sync"];
 export const showRpc = defineRpc({
   name: "git.show",
   input: z.object({ cwd: z.string(), hash }),
-  output: z.object({ message: z.string(), files: z.array(fileSchema) }),
+  output: z.object({
+    message: z.string(),
+    files: z.array(fileSchema),
+    stats: z.object({ files: z.number(), insertions: z.number(), deletions: z.number() }), // as `git show --shortstat` counts them
+  }),
 });
 
 /** The files that differ between two commits. */
