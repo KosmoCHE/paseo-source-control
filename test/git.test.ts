@@ -16,7 +16,7 @@ Object.assign(process.env, {
   GIT_COMMITTER_NAME: "Ada",
   GIT_COMMITTER_EMAIL: "ada@example.com",
 });
-const { baseOf, commit, compare, diff, discard, ignore, log, show, stage, status, unstage } = await import("../server/git.ts");
+const { baseOf, commit, compare, diff, discard, ignore, log, markers, remove, show, stage, status, unstage } = await import("../server/git.ts");
 
 function repository(t: TestContext) {
   const cwd = mkdtempSync(join(tmpdir(), "source-control-"));
@@ -78,7 +78,7 @@ test("edits, renames and discards", async (t) => {
   assert.deepEqual((await status({ cwd })).staged, []);
   assert.ok(existsSync(join(cwd, "c.txt"))); // unstaging leaves the working tree alone
 
-  await discard({ cwd, files: now.changes });
+  await discard({ cwd, files: now.changes, trash: false });
   now = await status({ cwd });
   assert.equal(readFileSync(join(cwd, "a.txt"), "utf8"), "one\n");
   assert.equal(existsSync(join(cwd, "new.txt")), false);
@@ -98,7 +98,10 @@ test("a conflict is listed apart and staging resolves it", async (t) => {
   assert.throws(() => git("merge", "--quiet", "side"));
 
   let now = await status({ cwd });
-  assert.deepEqual(now.conflicts, [{ path: "a.txt", status: "U" }]);
+  assert.deepEqual(now.conflicts, [{ path: "a.txt", status: "U", conflict: "UU" }]);
+  assert.deepEqual((await markers({ cwd, paths: ["a.txt"] })).paths, ["a.txt"]);
+  write("a.txt", "main and side\n");
+  assert.deepEqual((await markers({ cwd, paths: ["a.txt"] })).paths, []);
   write("a.txt", "both\n");
   await stage({ cwd, files: now.conflicts });
   now = await status({ cwd });
@@ -324,4 +327,30 @@ test("more paths than one command line holds are staged a part at a time", async
   for (let n = 0; n < 400; n++) write(`${long}-${n}.txt`, ""); // 40000 characters of paths
   await stage({ cwd, files: (await status({ cwd })).changes });
   assert.equal(git("diff", "--cached", "--name-only").split("\n").length, 400);
+});
+
+test("a file deleted by them and modified by us can be deleted, as VS Code's Delete File does", async (t) => {
+  const { cwd, git, write } = repository(t);
+  write("a.txt", "base\n");
+  git("add", ".");
+  git("commit", "--quiet", "--message=base");
+  git("switch", "--quiet", "--create", "side");
+  git("rm", "--quiet", "a.txt");
+  git("commit", "--quiet", "--message=gone");
+  git("switch", "--quiet", "main");
+  write("a.txt", "main\n");
+  git("commit", "--quiet", "--all", "--message=main");
+  assert.throws(() => git("merge", "--quiet", "side"));
+
+  const { conflicts } = await status({ cwd });
+  assert.deepEqual(conflicts, [{ path: "a.txt", status: "U", conflict: "UD" }]);
+  await remove({ cwd, files: conflicts });
+  assert.deepEqual((await status({ cwd })).conflicts, []);
+  assert.equal(existsSync(join(cwd, "a.txt")), false);
+});
+
+test("an untracked file the Trash cannot take is left, and said so", async (t) => {
+  const { cwd } = repository(t);
+  // A file that is not there fails the Trash without putting anything in it.
+  assert.deepEqual(await discard({ cwd, files: [{ path: "gone.txt", status: "?" }], trash: true }), { trashFailed: true });
 });

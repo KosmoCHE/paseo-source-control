@@ -5,28 +5,35 @@ import { Icon, Modal, useToast } from "@getpaseo/plugin/client/ui";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { Pressable, TextInput, View } from "react-native";
-import { commitRpc, discardRpc, ignoreRpc, stageRpc, unstageRpc } from "../shared/git";
+import { useRpc } from "@getpaseo/plugin/client";
+import { commitRpc, discardRpc, ignoreRpc, markersRpc, removeRpc, stageRpc, unstageRpc } from "../shared/git";
 import type { DiffSource, FileChange, Status } from "../shared/git";
 import * as codicon from "./codicons";
 import { showDiff } from "./diffTab";
 import { fileRows } from "./Files";
-import { useCommand } from "./git";
+import { useCommand, useSteps } from "./git";
 import { useOpenFile } from "./openFile";
 import type { Row } from "./sticky";
 import { StickyList } from "./StickyList";
+import { fileName } from "./tree";
 import { Heading, IconButton, T, toggle, useHint, useHost, useMenu } from "./ui";
 import type { MenuItem } from "./ui";
 
 const drafts = new Map<string, string>(); // repository → the message being written; outlives the panel, not the app
 const warned = new Set<string>(); // repositories told they have too many changes: as in VS Code, once while the app runs
 
-/** Something that cannot be undone, waiting for a yes. */
+/** One of VS Code's modal dialogs: a choice is answered with its label, Cancel or closing with null. */
 interface Question {
   title: string;
   text: string;
-  yes: string;
-  run: () => void;
+  choices: string[];
+  danger: boolean; // what is chosen cannot be undone
+  answer: (choice: string | null) => void;
 }
+
+/** "N files" or, for one, "the file's name", as VS Code words its dialogs. */
+const many = (files: FileChange[]) => files.length > 1;
+const named = (files: FileChange[]) => fileName(files[0]);
 
 interface Props {
   cwd: string;
@@ -40,10 +47,11 @@ export function Changes({ cwd, workspaceId, status, folded, onFold }: Props) {
   const { c, text } = useHost();
   const stage = useCommand(stageRpc, cwd);
   const unstage = useCommand(unstageRpc, cwd);
-  const discard = useCommand(discardRpc, cwd);
   const commit = useCommand(commitRpc, cwd);
+  const call = { stage: useRpc(stageRpc), discard: useRpc(discardRpc), remove: useRpc(removeRpc), markers: useRpc(markersRpc) };
   const [message, setMessage] = useState(() => drafts.get(cwd) ?? "");
-  const [question, ask] = useState<Question | null>(null);
+  const [question, setQuestion] = useState<Question | null>(null);
+  const ask = (title: string, text: string, choices: string[], danger = true) => new Promise<string | null>((answer) => setQuestion({ title, text, choices, danger, answer }));
   const [shut, setShut] = useState<Record<string, string[]>>({}); // a group's title → the paths of its folded folders
   const write = (next: string) => {
     drafts.set(cwd, next);
@@ -55,27 +63,77 @@ export function Changes({ cwd, workspaceId, status, folded, onFold }: Props) {
   const canCommit = written && staged && !commit.isPending;
   const send = (amend: boolean) => commit.mutate({ message, amend }, { onSuccess: () => write("") });
   const pushed = status.upstream !== null && status.ahead === 0; // the last commit is already on the upstream
-  const amend = () =>
-    pushed
-      ? ask({
-          title: "Amend a pushed commit?",
-          text: `The last commit is already on ${status.upstream}. Amending replaces it here, and the branch can then only be pushed by force.`,
-          yes: "Amend",
-          run: () => send(true),
-        })
-      : send(true);
-  /** Discards one file, or everything in a folder: `path` is the row that was asked about. */
-  const drop = (files: FileChange[], path: string) => {
-    const untracked = files.filter((file) => file.status === "?").length;
-    const changed = files.length - untracked;
-    const count = (n: number, what: string) => `${n} ${what}${n === 1 ? "" : "s"}`;
-    const text =
-      files.length === 1
-        ? untracked
-          ? `${files[0].path} is untracked. It will be deleted.`
-          : `The changes in ${files[0].path} will be lost.`
-        : `In ${path}, ${[changed && `the changes in ${count(changed, "file")} will be lost`, untracked && `${count(untracked, "untracked file")} will be deleted`].filter(Boolean).join(" and ")}.`;
-    ask({ title: changed ? "Discard changes?" : files.length === 1 ? "Delete file?" : "Delete files?", text, yes: changed ? "Discard" : "Delete", run: () => discard.mutate({ files }) });
+  const amend = async () => {
+    const text = `The last commit is already on ${status.upstream}. Amending replaces it here, and the branch can then only be pushed by force.`;
+    if (!pushed || (await ask("Amend a pushed commit?", text, ["Amend"])) === "Amend") send(true);
+  };
+  /**
+   * VS Code's Discard Changes, asked about in its words: tracked files are restored, untracked ones go to the Trash,
+   * and when the Trash cannot take them the question is whether to delete them for good.
+   */
+  const drop = useSteps(async (files: FileChange[]) => {
+    const untracked = files.filter((file) => file.status === "?");
+    const tracked = files.filter((file) => file.status !== "?");
+    const toTrash = many(untracked)
+      ? `Are you sure you want to DELETE the ${untracked.length} untracked files?`
+      : `Are you sure you want to DELETE the following untracked file: '${named(untracked.length ? untracked : files)}'?`;
+    const fromTrash = many(untracked) ? "You can restore these files from the Trash." : "You can restore this file from the Trash.";
+    const lost = "This is IRREVERSIBLE!\nYour current working set will be FOREVER LOST if you proceed.";
+    let chosen = files;
+    if (!untracked.length) {
+      const deleted = tracked.every((file) => file.status === "D");
+      const title = deleted
+        ? many(tracked)
+          ? `Are you sure you want to restore ALL ${tracked.length} files?`
+          : `Are you sure you want to restore '${named(tracked)}'?`
+        : many(tracked)
+          ? `Are you sure you want to discard ALL changes in ${tracked.length} files?`
+          : `Are you sure you want to discard changes in '${named(tracked)}'?`;
+      const yes = deleted ? (many(tracked) ? `Restore All ${tracked.length} Files` : "Restore File") : many(tracked) ? `Discard All ${tracked.length} Files` : "Discard File";
+      if ((await ask(title, !deleted && many(tracked) ? lost : "", [yes])) !== yes) return;
+    } else if (!tracked.length) {
+      if ((await ask(toTrash, fromTrash, ["Move to Trash"])) !== "Move to Trash") return;
+    } else {
+      const trackedToo = many(tracked) ? `Are you sure you want to discard ALL changes in ${tracked.length} files?` : `Are you sure you want to discard changes in '${named(tracked)}'?`;
+      const yesTracked = many(tracked) ? `Discard All ${tracked.length} Tracked Files` : "Discard 1 Tracked File";
+      const yesAll = `Discard All ${files.length} Files`;
+      const pick = await ask(toTrash, `${fromTrash}\n\n${trackedToo}\n\n${lost}`, [yesTracked, yesAll]);
+      if (pick === yesTracked) chosen = tracked;
+      else if (pick !== yesAll) return;
+    }
+    const { trashFailed } = await call.discard({ cwd, files: chosen, trash: true });
+    if (!trashFailed) return;
+    const left = chosen.filter((file) => file.status === "?");
+    const yes = many(left) ? `Delete All ${left.length} Files` : "Delete File";
+    if ((await ask("Failed to delete using the Trash. Do you want to permanently delete instead?", "", [yes])) === yes) await call.discard({ cwd, files: left, trash: false });
+  });
+  /**
+   * VS Code's Stage Changes on files in conflict: it asks first about any that still hold conflict markers, and what to
+   * keep of a file deleted on one side.
+   */
+  const resolve = useSteps(async (files: FileChange[]) => {
+    const both = files.filter((file) => file.conflict === "UU" || file.conflict === "AA");
+    const deletions = files.filter((file) => file.conflict === "UD" || file.conflict === "DU");
+    const marked = both.length ? (await call.markers({ cwd, paths: both.map((file) => file.path) })).paths : [];
+    const unresolved = files.filter((file) => !deletions.includes(file) && (!both.includes(file) || marked.includes(file.path)));
+    if (unresolved.length) {
+      const title = many(unresolved) ? `Are you sure you want to stage ${unresolved.length} files with merge conflicts?` : `Are you sure you want to stage ${named(unresolved)} with merge conflicts?`;
+      if ((await ask(title, "", ["Yes"])) !== "Yes") return;
+    }
+    for (const file of deletions) {
+      const ours = file.conflict === "UD"; // deleted by them, changed by us
+      const keep = ours ? "Keep Our Version" : "Keep Their Version";
+      const title = `File "${fileName(file)}" was deleted by ${ours ? "them and modified by us" : "us and modified by them"}.`;
+      const pick = await ask(title, "What would you like to do?", [keep, "Delete File"], false);
+      if (pick === null) return;
+      await (pick === keep ? call.stage : call.remove)({ cwd, files: [file] });
+    }
+    const rest = files.filter((file) => !deletions.includes(file));
+    if (rest.length) await call.stage({ cwd, files: rest });
+  });
+  const reply = (asked: Question, choice: string | null) => {
+    setQuestion(null);
+    asked.answer(choice);
   };
   const openFile = useOpenFile();
   /** VS Code's Open File, on a file that is there to open. */
@@ -133,12 +191,18 @@ export function Changes({ cwd, workspaceId, status, folded, onFold }: Props) {
     </View>
   );
   const rows = [
-    ...group("Merge Changes", status.conflicts, { kind: "changes" }, null, (files, path, file) => (
-      <>
-        {opener(file)}
-        <IconButton icon={codicon.add} label={`Mark ${path} as resolved`} hint="Mark as resolved" onPress={() => stage.mutate({ files })} />
-      </>
-    )),
+    ...group(
+      "Merge Changes",
+      status.conflicts,
+      { kind: "changes" },
+      <IconButton icon={codicon.add} label="Stage All Merge Changes" onPress={() => resolve.mutate(status.conflicts)} />,
+      (files, path, file) => (
+        <>
+          {opener(file)}
+          <IconButton icon={codicon.add} label={`Stage ${path}`} hint="Stage Changes" onPress={() => resolve.mutate(files)} />
+        </>
+      ),
+    ),
     ...group(
       "Staged Changes",
       status.staged,
@@ -155,11 +219,14 @@ export function Changes({ cwd, workspaceId, status, folded, onFold }: Props) {
       "Changes",
       status.changes,
       { kind: "changes" },
-      <IconButton icon={codicon.add} label="Stage all changes" onPress={() => stage.mutate({ files: status.changes })} />,
+      <>
+        <IconButton icon={codicon.discard} label="Discard All Changes" onPress={() => drop.mutate(status.changes)} />
+        <IconButton icon={codicon.add} label="Stage All Changes" onPress={() => stage.mutate({ files: status.changes })} />
+      </>,
       (files, path, file) => (
         <>
           {opener(file)}
-          <IconButton icon={codicon.discard} label={`Discard changes in ${path}`} hint="Discard changes" onPress={() => drop(files, path)} />
+          <IconButton icon={codicon.discard} label={`Discard changes in ${path}`} hint="Discard Changes" onPress={() => drop.mutate(files)} />
           <IconButton icon={codicon.add} label={`Stage ${path}`} hint="Stage changes" onPress={() => stage.mutate({ files })} />
         </>
       ),
@@ -168,21 +235,16 @@ export function Changes({ cwd, workspaceId, status, folded, onFold }: Props) {
   return (
     <>
       <StickyList head={head} rows={rows} />
-      <Modal title={question?.title ?? ""} open={question !== null} onOpenChange={(open) => !open && ask(null)}>
+      <Modal title={question?.title ?? ""} open={question !== null} onOpenChange={(open) => !open && question && reply(question, null)}>
         <Modal.Content>
           {question && (
             <>
-              <T>{question.text}</T>
-              <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8 }}>
-                <Choice label="Cancel" onPress={() => ask(null)} />
-                <Choice
-                  label={question.yes}
-                  danger
-                  onPress={() => {
-                    question.run();
-                    ask(null);
-                  }}
-                />
+              {question.text !== "" && <T>{question.text}</T>}
+              <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-end", gap: 8 }}>
+                <Choice label="Cancel" onPress={() => reply(question, null)} />
+                {question.choices.map((choice) => (
+                  <Choice key={choice} label={choice} danger={question.danger} onPress={() => reply(question, choice)} />
+                ))}
               </View>
             </>
           )}

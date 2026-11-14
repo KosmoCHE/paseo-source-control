@@ -17,6 +17,8 @@ import type {
   discardRpc,
   ignoreRpc,
   logRpc,
+  markersRpc,
+  removeRpc,
   showRpc,
   stageRpc,
   statusRpc,
@@ -57,19 +59,24 @@ const pathsOf = (files: FileChange[]) => files.flatMap((file) => (file.from ? [f
 
 const MAX_CLI_LENGTH = 30_000; // VS Code's: past some length a command line is cut short (microsoft/vscode#65693)
 
-/** Runs `git <args> -- <paths>` as many times as it takes to keep each command line under that length, as VS Code does. */
-async function onPaths(cwd: string, args: string[], paths: string[]) {
+/** Splits paths into parts that each keep a command line under that length, as VS Code's splitInChunks does. */
+function* chunks(paths: string[]) {
   let chunk: string[] = [];
   let length = 0;
   for (const path of paths) {
     if (chunk.length && length + path.length > MAX_CLI_LENGTH) {
-      await git(cwd, [...args, "--", ...chunk]);
+      yield chunk;
       [chunk, length] = [[], 0];
     }
     chunk.push(path);
     length += path.length;
   }
-  if (chunk.length) await git(cwd, [...args, "--", ...chunk]);
+  if (chunk.length) yield chunk;
+}
+
+/** Runs `git <args> -- <paths>`, a part of the paths at a time. */
+async function onPaths(cwd: string, args: string[], paths: string[]) {
+  for (const chunk of chunks(paths)) await git(cwd, [...args, "--", ...chunk]);
 }
 
 // --- working tree ---------------------------------------------------------------
@@ -109,7 +116,7 @@ export function parseStatus(out: string) {
       if (index !== ".") status.staged.push({ path, status: index, ...(moved(index) && { from }) });
       if (tree !== ".") status.changes.push({ path, status: tree, ...(moved(tree) && { from }) });
     } else if (parts[0] === "u") {
-      status.conflicts.push({ path: parts.slice(10).join(" "), status: "U" });
+      status.conflicts.push({ path: parts.slice(10).join(" "), status: "U", conflict: parts[1] as FileChange["conflict"] });
     } else if (parts[0] === "?") {
       status.changes.push({ path: entry.slice(2), status: "?" });
     }
@@ -264,16 +271,52 @@ export async function unstage({ cwd, files }: RpcInput<typeof unstageRpc>) {
   return {};
 }
 
-export async function discard({ cwd, files }: RpcInput<typeof discardRpc>) {
-  const untracked = files.filter((file) => file.status === "?");
+export async function discard({ cwd, files, trash }: RpcInput<typeof discardRpc>): Promise<RpcOutput<typeof discardRpc>> {
+  const untracked = pathsOf(files.filter((file) => file.status === "?"));
   const tracked = files.filter((file) => file.status !== "?");
   if (tracked.length) await onPaths(cwd, ["restore", "--worktree"], pathsOf(tracked));
-  if (untracked.length) await onPaths(cwd, ["clean", "--force", "--quiet"], pathsOf(untracked));
+  if (!untracked.length) return { trashFailed: false };
+  if (!trash) {
+    await onPaths(cwd, ["clean", "--force", "--quiet"], untracked);
+    return { trashFailed: false };
+  }
+  try {
+    await toTrash(cwd, untracked);
+  } catch (error) {
+    // As in VS Code, the panel then asks whether to delete them for good.
+    console.warn(`Could not move to the Trash in ${cwd}: ${(error as Error).message}`);
+    return { trashFailed: true };
+  }
+  return { trashFailed: false };
+}
+
+/** Moves files to the Trash with the `trash` command macOS has had since 15. No other system is known to have one. */
+async function toTrash(cwd: string, paths: string[]) {
+  if (process.platform !== "darwin") throw new Error(`No Trash is known on ${process.platform}`);
+  for (const chunk of chunks(paths)) await run("/usr/bin/trash", chunk, { cwd });
+}
+
+export async function remove({ cwd, files }: RpcInput<typeof removeRpc>) {
+  await onPaths(cwd, ["rm", "--quiet"], pathsOf(files));
   return {};
 }
 
+const MARKER = /^<{7}\s|^={7}$|^>{7}\s/m; // VS Code's test for a conflict left in a file
+
+export async function markers({ cwd, paths }: RpcInput<typeof markersRpc>): Promise<RpcOutput<typeof markersRpc>> {
+  const marked = await Promise.all(paths.map(async (path) => MARKER.test(await readFile(join(cwd, path), "utf8"))));
+  return { paths: paths.filter((_, n) => marked[n]) };
+}
+
 export async function commit({ cwd, message, amend }: RpcInput<typeof commitRpc>) {
-  await git(cwd, ["commit", ...(amend ? ["--amend"] : []), ...(message.trim() ? ["--message", message] : ["--no-edit"])]);
+  try {
+    // As VS Code commits: with the author git is told, never one it guesses from the machine.
+    await git(cwd, ["-c", "user.useConfigOnly=true", "commit", ...(amend ? ["--amend"] : []), ...(message.trim() ? ["--message", message] : ["--no-edit"])]);
+  } catch (error) {
+    if (/no (name|email) was given and auto-detection is disabled/.test((error as Error).message))
+      throw new Error('Make sure you configure your "user.name" and "user.email" in git.', { cause: error });
+    throw error;
+  }
   return {};
 }
 

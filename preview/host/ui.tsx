@@ -2,6 +2,7 @@
 // these are the host's pieces, and only their place in the layout matters here.
 
 import type { ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { Text, View } from "react-native";
 
 /** The panel only uses inline SVG. The host draws it at the size asked for, in the colour asked for. */
@@ -43,13 +44,15 @@ export const copyText = (text: string) => navigator.clipboard.writeText(text);
 
 export function Modal({ title, open, children }: { title: string; open: boolean; onOpenChange: (open: boolean) => void; children: ReactNode }) {
   if (!open) return null;
-  return (
+  // On the page's body, as Paseo draws its modals over everything: inside the panel, a later section would cover it.
+  return createPortal(
     <View style={{ position: "fixed" as "absolute", inset: 0, zIndex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#0008" }}>
       <View style={{ width: 360, borderRadius: 8, backgroundColor: "#26262b" }}>
         <Text style={{ padding: 16, fontWeight: "600", color: "#fff" }}>{title}</Text>
         {children}
       </View>
-    </View>
+    </View>,
+    document.body,
   );
 }
 Modal.Content = function Content({ children }: { children: ReactNode }) {

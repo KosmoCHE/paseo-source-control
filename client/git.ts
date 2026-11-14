@@ -21,16 +21,17 @@ export function useStatus(cwd: string) {
   return useQuery({ queryKey: key("status", cwd), queryFn: () => read({ cwd }), refetchInterval: (query) => (query.state.data?.cutAt ? false : 3000) });
 }
 
-/** A git command the user asked for. A failure is shown; either way the panel reads the repository again. */
-export function useCommand<Input extends ZodType<{ cwd: string }>, Output extends ZodType>(contract: PluginRpcContract<Input, Output>, cwd: string) {
-  const call = useRpc(contract);
+/** What the user asked for, in as many steps as it takes. A failure is shown; either way the panel reads the repository again. */
+export function useSteps<Input, Output>(steps: (input: Input) => Promise<Output>) {
   const toast = useToast();
   const queries = useQueryClient();
-  return useMutation({
-    mutationFn: (input: Omit<ZodInput<Input>, "cwd">) => call({ ...input, cwd } as ZodInput<Input>),
-    onError: (error) => toast.error(error.message),
-    onSettled: () => queries.invalidateQueries({ queryKey: key() }),
-  });
+  return useMutation({ mutationFn: steps, onError: (error) => toast.error(error.message), onSettled: () => queries.invalidateQueries({ queryKey: key() }) });
+}
+
+/** A git command the user asked for, as `useSteps` runs it. */
+export function useCommand<Input extends ZodType<{ cwd: string }>, Output extends ZodType>(contract: PluginRpcContract<Input, Output>, cwd: string) {
+  const call = useRpc(contract);
+  return useSteps((input: Omit<ZodInput<Input>, "cwd">) => call({ ...input, cwd } as ZodInput<Input>));
 }
 
 const AUTO_FETCH = 180_000; // VS Code's git.autofetchPeriod, three minutes

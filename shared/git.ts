@@ -13,6 +13,9 @@ export const fileSchema = z.object({
   path: z.string(),
   from: z.string().optional(), // a rename's old path
   status: z.string(), // one letter: M A D R C T, U for a conflict, ? for untracked
+  // A conflict's two letters from git: what each side did, us then them. DD both deleted, AU added by us, UD deleted by
+  // them, UA added by them, DU deleted by us, AA both added, UU both modified.
+  conflict: z.enum(["DD", "AU", "UD", "UA", "DU", "AA", "UU"]).optional(),
 });
 export type FileChange = z.infer<typeof fileSchema>;
 
@@ -134,8 +137,15 @@ const files = z.object({ cwd: z.string(), files: z.array(fileSchema).min(1) });
 
 export const stageRpc = defineRpc({ name: "git.stage", input: files, output: nothing });
 export const unstageRpc = defineRpc({ name: "git.unstage", input: files, output: nothing });
-/** Throws away unstaged edits, and deletes untracked files. */
-export const discardRpc = defineRpc({ name: "git.discard", input: files, output: nothing });
+/**
+ * Throws away unstaged edits, and deletes untracked files: with `trash`, as VS Code does by default, into the Trash, and
+ * `trashFailed` when they could not be put there. They are then left as they were.
+ */
+export const discardRpc = defineRpc({ name: "git.discard", input: files.extend({ trash: z.boolean() }), output: z.object({ trashFailed: z.boolean() }) });
+/** Removes files from the working tree and the index: VS Code's Delete File for a file deleted on one side of a merge. */
+export const removeRpc = defineRpc({ name: "git.remove", input: files, output: nothing });
+/** The files among `paths` that still hold conflict markers. */
+export const markersRpc = defineRpc({ name: "git.markers", input: z.object({ cwd: z.string(), paths: z.array(z.string()) }), output: z.object({ paths: z.array(z.string()) }) });
 
 /** Adds paths, relative to the repository's root, to its .gitignore. */
 export const ignoreRpc = defineRpc({ name: "git.ignore", input: z.object({ cwd: z.string(), paths: z.array(z.string()).min(1) }), output: nothing });
