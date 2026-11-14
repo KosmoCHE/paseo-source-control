@@ -34,6 +34,9 @@ interface TProps {
   style?: StyleProp<TextStyle>;
 }
 
+/** The list with `item` taken out if it is in it, and put in if it is not. */
+export const toggle = (list: string[], item: string) => (list.includes(item) ? list.filter((other) => other !== item) : [...list, item]);
+
 /** Text in the theme's colours. */
 export function T({ children, size, color, weight, mono, lines, selectable, style }: TProps) {
   const host = useHost();

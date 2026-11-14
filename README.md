@@ -1,9 +1,9 @@
 # Source Control for Paseo
 
-A [Paseo](https://paseo.sh) plugin that adds a Source Control panel to every workspace, modelled on the one in VS Code: the workspace's repositories, the selected repository's working tree, and its commit graph. Each scrolls on its own, the lines between them drag to resize them, and the repository list and the graph fold from their title bars.
+A [Paseo](https://paseo.sh) plugin that adds a Source Control panel to every workspace, modelled on the one in VS Code: the workspace's repositories, the selected repository's working tree, and its commit graph. Each scrolls on its own under a title bar that stays put, the lines between them drag to resize them, and each folds from its title bar.
 
 - **Repositories**: the repositories VS Code would list for the workspace's folder. Each shows its branch marked as VS Code marks it, `*` for changed or untracked files, `+` for staged ones and `!` while a merge or rebase is under way, with the branch icon to match; and, when it differs from its upstream, the commits to pull and to push (`2↓ 1↑`). Selecting one shows it in the rest of the panel.
-- **Changes**: commit message, the Commit button, and the staged files, changed files and files in conflict as trees of folders. Stage, unstage and discard a file or everything in a folder; stage or unstage everything from the group's title. **Open File** opens a changed file in Paseo's own file tab, as its file tree does. The arrow at the right of the Commit button opens the other ways to commit: **Commit (Amend)** folds what is staged into the last commit, and rewords it when a message is written.
+- **Changes**: commit message, the Commit button, and the staged files, changed files and files in conflict as trees of folders. Stage, unstage and discard a file or everything in a folder; stage or unstage everything from the group's title. While the files scroll, the title of their group and the folders they are in stay at the top, one under the other, as VS Code's sticky scroll keeps them. **Open File** opens a changed file in Paseo's own file tab, as its file tree does. The arrow at the right of the Commit button opens the other ways to commit: **Commit (Amend)** folds what is staged into the last commit, and rewords it when a message is written.
 - **Graph**: one row per commit with its lanes, merges, branch names, remote branches and tags. The scope switch shows all branches (`All`, the default) or the checked-out branch with its upstream (`Auto`). Selecting a commit shows its message and its changed files, as a tree too. Fetch, pull and push sit in the title bar.
 - **Diff**: selecting a file opens its diff in a workspace tab.
 
@@ -59,10 +59,12 @@ shared/git.ts      the RPC contracts
 server/git.ts      runs git and reads its output
 server/repositories.ts  finds the workspace's repositories
 client/Repositories.tsx the repository list
-client/Split.tsx        the three sections and the lines that resize them
+client/Split.tsx        the three sections, their title bars and the lines that resize them
 client/lanes.ts    gives every commit a lane
 client/Graph.tsx   draws the graph rows
 client/Changes.tsx the working tree part
+client/sticky.ts   which rows stay at the top of a scrolling tree
+client/StickyList.tsx draws them there
 client/openFile.tsx opens a file in Paseo's file tab
 client/fileLink.ts the link it opens the file with
 client/tree.ts     arranges changed files as a tree of folders
@@ -70,7 +72,7 @@ client/Files.tsx   draws that tree
 client/codicons.ts the icons taken from VS Code
 client/Diff.tsx    the diff tab
 client/Panel.tsx   puts the panel together
-test/              node:test suites for the git reader, the repository search, the lanes, the file tree and the patch reader
+test/              node:test suites for the git reader, the repository search, the lanes, the file tree, the rows kept at the top and the patch reader
 preview/           the panel in a browser, for development
 ```
 

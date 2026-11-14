@@ -1,13 +1,14 @@
-// The panel's three sections, stacked. The line between two of them drags to move the border
-// it marks, as the sashes between VS Code's panes do: one section grows by what the other gives up.
-// A folded section is as tall as its title bar, and the line beside it does not drag.
+// The panel's three sections, stacked. Each has a title bar that stays put, and under it a body that
+// scrolls on its own. The line between two open sections drags to move the border it marks, as the
+// sashes between VS Code's panes do: one section grows by what the other gives up. A folded section
+// is as tall as what it still shows.
 
 import { useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { PanResponder, ScrollView, View } from "react-native";
+import { PanResponder, View } from "react-native";
 import type { LayoutChangeEvent, ViewStyle } from "react-native";
 import { z } from "zod";
-import { useHost } from "./ui";
+import { Heading, useHost } from "./ui";
 
 /** The upper two sections' shares of the panel's height. null: as tall as the content, up to a cap. The graph takes the rest. */
 export const sizesSchema = z.object({ repositories: z.number().nullable(), changes: z.number().nullable() });
@@ -18,16 +19,24 @@ const LEAST = 48; // the height a section keeps when its neighbour is dragged ov
 const TITLE: ViewStyle = { flexGrow: 0, flexShrink: 0 }; // a folded section: as tall as what is left of it
 const REST: ViewStyle = { flex: 1, minHeight: 0 }; // the section that takes the room the others leave
 
+export interface Section {
+  title: string;
+  count?: number; // how many things it holds, shown in the title bar
+  folded: boolean;
+  onFold: () => void;
+  actions?: ReactNode; // in the title bar while the section is open
+  body: ReactNode; // what shows under the title bar, scrolling on its own
+}
+
 interface Props {
   sizes: Sizes;
   onSizes: (sizes: Sizes) => void; // once, when a drag ends
-  repositories: ReactNode;
-  changes: ReactNode;
-  graph: ReactNode;
-  folded: { repositories: boolean; graph: boolean }; // with the graph folded, the changes take the room it leaves
+  repositories: Section;
+  changes: Section;
+  graph: Section;
 }
 
-export function Split({ sizes, onSizes, repositories, folded, changes, graph }: Props) {
+export function Split({ sizes, onSizes, repositories, changes, graph }: Props) {
   const [now, setNow] = useState(sizes); // followed while a line is dragged, saved when it is let go
   const latest = useRef(now);
   latest.current = now;
@@ -39,12 +48,15 @@ export function Split({ sizes, onSizes, repositories, folded, changes, graph }: 
   const begin = () => {
     held.current = { ...heights.current };
   };
+  // The last open section takes the room the others leave.
+  const rest = [graph, changes, repositories].find((section) => !section.folded);
+  const changesTakeRest = rest === changes;
   const within = (move: number, least: number, most: number) => Math.min(Math.max(move, least), most);
   const moveUpper = (dy: number) => {
     const { all, repositories, changes } = held.current;
     const move = within(dy, LEAST - repositories, changes - LEAST);
-    // With the graph folded the changes have no share of their own to give up: they take what is left.
-    setNow((sizes) => ({ repositories: (repositories + move) / all, changes: folded.graph ? sizes.changes : (changes - move) / all }));
+    // When the changes take what is left, they have no share of their own to give up.
+    setNow((sizes) => ({ repositories: (repositories + move) / all, changes: changesTakeRest ? sizes.changes : (changes - move) / all }));
   };
   const moveLower = (dy: number) => {
     const { all, changes, graph } = held.current;
@@ -52,20 +64,28 @@ export function Split({ sizes, onSizes, repositories, folded, changes, graph }: 
     setNow((sizes) => ({ ...sizes, changes: (changes + move) / all }));
   };
   const end = () => onSizes(latest.current);
-  const pane = (share: number | null, cap: `${number}%`): ViewStyle => (share === null ? { flexGrow: 0, maxHeight: cap } : { flexGrow: 0, flexShrink: 0, height: `${share * 100}%` });
+  /** A section's height. One with a share of null is as tall as its content, up to `cap`. */
+  const height = (section: Section, share: number | null, cap: `${number}%`): ViewStyle =>
+    section.folded ? TITLE : section === rest ? REST : share === null ? { flexGrow: 0, maxHeight: cap } : { flexGrow: 0, flexShrink: 0, height: `${share * 100}%` };
   return (
     <View style={{ flex: 1 }} onLayout={measure("all")}>
-      <ScrollView style={folded.repositories ? TITLE : pane(now.repositories, CAP.repositories)} onLayout={measure("repositories")}>
-        {repositories}
-      </ScrollView>
-      <Divider label="Resize Repositories" fixed={folded.repositories} onStart={begin} onDrag={moveUpper} onEnd={end} />
-      <ScrollView style={folded.graph ? REST : pane(now.changes, CAP.changes)} keyboardShouldPersistTaps="handled" onLayout={measure("changes")}>
-        {changes}
-      </ScrollView>
-      <Divider label="Resize Changes" fixed={folded.graph} onStart={begin} onDrag={moveLower} onEnd={end} />
-      <View style={folded.graph ? TITLE : REST} onLayout={measure("graph")}>
-        {graph}
-      </View>
+      <Part section={repositories} style={height(repositories, now.repositories, CAP.repositories)} onLayout={measure("repositories")} />
+      <Divider label="Resize Repositories" fixed={repositories.folded || changes.folded} onStart={begin} onDrag={moveUpper} onEnd={end} />
+      <Part section={changes} style={height(changes, now.changes, CAP.changes)} onLayout={measure("changes")} />
+      <Divider label="Resize Changes" fixed={changes.folded || graph.folded} onStart={begin} onDrag={moveLower} onEnd={end} />
+      <Part section={graph} style={graph.folded ? TITLE : REST} onLayout={measure("graph")} />
+    </View>
+  );
+}
+
+/** A section: its title bar, which folds it, and its body. A folded section keeps its actions to itself, as in VS Code. */
+function Part({ section, style, onLayout }: { section: Section; style: ViewStyle; onLayout: (event: LayoutChangeEvent) => void }) {
+  return (
+    <View style={style} onLayout={onLayout}>
+      <Heading title={section.title} folded={section.folded} onFold={section.onFold} count={section.count}>
+        {!section.folded && section.actions}
+      </Heading>
+      {section.body}
     </View>
   );
 }

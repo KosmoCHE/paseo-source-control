@@ -1,24 +1,22 @@
 // The workspace's repositories. One is selected, and the rest of the panel shows that one.
 
 import { Icon } from "@getpaseo/plugin/client/ui";
-import { Pressable, View } from "react-native";
+import { Pressable, ScrollView, View } from "react-native";
 import type { Repository } from "../shared/git";
 import * as codicon from "./codicons";
-import { Heading, T, Tint, useHost } from "./ui";
+import { T, Tint, useHost } from "./ui";
 
 interface Props {
   list: Repository[];
   selected: Repository;
   folded: boolean; // folded, only the selected repository shows
-  onFold: () => void;
   onSelect: (root: string) => void;
 }
 
-export function Repositories({ list, selected, folded, onFold, onSelect }: Props) {
+export function Repositories({ list, selected, folded, onSelect }: Props) {
   const { c, row, small } = useHost();
   return (
-    <View>
-      <Heading title="Repositories" folded={folded} onFold={onFold} count={list.length} />
+    <ScrollView>
       {(folded ? [selected] : list).map((repository) => {
         const chosen = repository === selected;
         return (
@@ -47,7 +45,7 @@ export function Repositories({ list, selected, folded, onFold, onSelect }: Props
           </Pressable>
         );
       })}
-    </View>
+    </ScrollView>
   );
 }
 

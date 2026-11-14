@@ -1,6 +1,6 @@
 // The Source Control panel, laid out like VS Code's: the workspace's repositories, the selected
-// repository's working tree, and its commit graph. Each of the three scrolls on its own, and
-// the lines between them drag.
+// repository's working tree, and its commit graph. Each of the three has a title bar that stays
+// put and scrolls on its own under it, and the lines between them drag.
 
 import type { PluginTab, PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
 import { useRpc, useTabState, useWorkspace } from "@getpaseo/plugin/client";
@@ -13,19 +13,19 @@ import { logRpc, repositoriesRpc, scopeSchema } from "../shared/git";
 import type { Commit, Repository, Scope } from "../shared/git";
 import { Changes } from "./Changes";
 import { key, useStatus } from "./git";
-import { CommitItem, GraphHeader } from "./Graph";
+import { CommitItem, GraphActions } from "./Graph";
 import { layout as lanes } from "./lanes";
 import { FileOpener } from "./openFile";
 import { Repositories } from "./Repositories";
 import { Split, sizesSchema } from "./Split";
-import { HostProvider, Notice, PanelRoot, T, useHost } from "./ui";
+import { HostProvider, Notice, PanelRoot, T, toggle, useHost } from "./ui";
 
 const PAGE = 200; // commits read at first, and added by each "Load more"
 const NONE: Commit[] = [];
 
 const viewSchema = z.object({
   scope: scopeSchema,
-  folded: z.array(z.string()), // the titles of the folded sections
+  folded: z.array(z.string()), // the titles of the folded sections, and "group:<title>" for the folded groups of changes
   selected: z.string().nullable(), // a repository's root; null: the first one
   parent: z.boolean(), // the repository above the workspace's folder was asked for
   sizes: sizesSchema,
@@ -68,18 +68,26 @@ function Workspace({ directory, workspaceId, tab }: { directory: string; workspa
     );
   const selected = list.find((repository) => repository.root === view.selected) ?? list[0];
   const cwd = selected.root;
-  const fold = (title: string) => setView({ ...view, folded: view.folded.includes(title) ? view.folded.filter((name) => name !== title) : [...view.folded, title] });
-  const folded = { repositories: view.folded.includes("Repositories"), graph: view.folded.includes("Graph") };
+  const fold = (title: string) => setView({ ...view, folded: toggle(view.folded, title) });
+  const section = (title: string) => ({ title, folded: view.folded.includes(title), onFold: () => fold(title) });
+  const folded = { repositories: view.folded.includes("Repositories"), changes: view.folded.includes("Changes"), graph: view.folded.includes("Graph") };
   return (
     <>
       {found.error && <Notice failed>{found.error.message}</Notice>}
       <Split
         sizes={view.sizes}
         onSizes={(sizes) => setView({ ...view, sizes })}
-        folded={folded}
-        repositories={<Repositories list={list} selected={selected} folded={folded.repositories} onFold={() => fold("Repositories")} onSelect={(root) => setView({ ...view, selected: root })} />}
-        changes={<WorkingTree key={cwd} cwd={cwd} workspaceId={workspaceId} folded={view.folded} onFold={fold} />}
-        graph={<History key={cwd} cwd={cwd} workspaceId={workspaceId} scope={view.scope} onScope={(scope) => setView({ ...view, scope })} folded={folded.graph} onFold={() => fold("Graph")} />}
+        repositories={{
+          ...section("Repositories"),
+          count: list.length,
+          body: <Repositories list={list} selected={selected} folded={folded.repositories} onSelect={(root) => setView({ ...view, selected: root })} />,
+        }}
+        changes={{ ...section("Changes"), body: !folded.changes && <WorkingTree key={cwd} cwd={cwd} workspaceId={workspaceId} folded={view.folded} onFold={fold} /> }}
+        graph={{
+          ...section("Graph"),
+          actions: <GraphActions cwd={cwd} scope={view.scope} onScope={(scope) => setView({ ...view, scope })} />,
+          body: !folded.graph && <History key={cwd} cwd={cwd} workspaceId={workspaceId} scope={view.scope} />,
+        }}
       />
     </>
   );
@@ -97,17 +105,8 @@ function WorkingTree({ cwd, workspaceId, folded, onFold }: { cwd: string; worksp
   );
 }
 
-interface HistoryProps {
-  cwd: string;
-  workspaceId: string;
-  scope: Scope;
-  onScope: (scope: Scope) => void;
-  folded: boolean;
-  onFold: () => void;
-}
-
-/** The selected repository's commit graph. Folded, it is its title bar alone, and reads no history. */
-function History({ cwd, workspaceId, scope, onScope, folded, onFold }: HistoryProps) {
+/** The selected repository's commit graph. It is not there while the graph is folded, and reads no history then. */
+function History({ cwd, workspaceId, scope }: { cwd: string; workspaceId: string; scope: Scope }) {
   const { c, row } = useHost();
   const [limit, setLimit] = useState(PAGE);
   const [open, setOpen] = useState<string | null>(null); // the commit whose details show
@@ -117,46 +116,34 @@ function History({ cwd, workspaceId, scope, onScope, folded, onFold }: HistoryPr
     // The history is read again whenever HEAD or any ref has moved.
     queryKey: key("log", cwd, scope, limit, status?.head, status?.branch, status?.refs),
     queryFn: () => read({ cwd, scope, limit }),
-    enabled: !folded && Boolean(status?.head),
+    enabled: Boolean(status?.head),
     placeholderData: keepPreviousData,
   });
   const commits = history.data?.commits ?? NONE;
   const rails = useMemo(() => lanes(commits), [commits]);
   if (!status) return null;
   return (
-    <>
-      <GraphHeader cwd={cwd} scope={scope} onScope={onScope} folded={folded} onFold={onFold} />
-      {!folded && (
-        <FlatList
-          style={{ flex: 1 }}
-          data={commits}
-          extraData={open}
-          keyExtractor={(commit) => commit.hash}
-          renderItem={({ item, index }) => (
-            <CommitItem
-              cwd={cwd}
-              workspaceId={workspaceId}
-              commit={item}
-              rail={rails[index]}
-              open={item.hash === open}
-              onToggle={() => setOpen(item.hash === open ? null : item.hash)}
-            />
-          )}
-          ListFooterComponent={
-            history.error ? (
-              <Notice failed>{history.error.message}</Notice>
-            ) : status.head === null ? (
-              <Notice>No commits yet.</Notice>
-            ) : !history.data ? (
-              <Loading />
-            ) : history.data.more ? (
-              <Pressable accessibilityRole="button" onPress={() => setLimit(limit + PAGE)} style={{ height: row + 8, alignItems: "center", justifyContent: "center" }}>
-                <T color={c.accent}>{history.isPlaceholderData ? "Loading…" : "Load more"}</T>
-              </Pressable>
-            ) : null
-          }
-        />
+    <FlatList
+      style={{ flex: 1 }}
+      data={commits}
+      extraData={open}
+      keyExtractor={(commit) => commit.hash}
+      renderItem={({ item, index }) => (
+        <CommitItem cwd={cwd} workspaceId={workspaceId} commit={item} rail={rails[index]} open={item.hash === open} onToggle={() => setOpen(item.hash === open ? null : item.hash)} />
       )}
-    </>
+      ListFooterComponent={
+        history.error ? (
+          <Notice failed>{history.error.message}</Notice>
+        ) : status.head === null ? (
+          <Notice>No commits yet.</Notice>
+        ) : !history.data ? (
+          <Loading />
+        ) : history.data.more ? (
+          <Pressable accessibilityRole="button" onPress={() => setLimit(limit + PAGE)} style={{ height: row + 8, alignItems: "center", justifyContent: "center" }}>
+            <T color={c.accent}>{history.isPlaceholderData ? "Loading…" : "Load more"}</T>
+          </Pressable>
+        ) : null
+      }
+    />
   );
 }
