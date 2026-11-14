@@ -15,7 +15,7 @@ import type { RpcInput, RpcOutput } from "@getpaseo/plugin";
 import stripJsonComments from "strip-json-comments";
 import { z } from "zod";
 import type { repositoriesRpc } from "../shared/git";
-import { git, parseStatus } from "./git.ts"; // with its extension, so that the tests can load this module without a bundler
+import { parseStatus, porcelain } from "./git.ts"; // with its extension, so that the tests can load this module without a bundler
 
 // VS Code's own defaults.
 const settingsSchema = z.object({
@@ -86,23 +86,30 @@ export async function repositories({ cwd }: RpcInput<typeof repositoriesRpc>): P
   for (const path of settings["git.ignoredRepositories"]) roots.delete(resolve(folder, path));
 
   const describe = async (root: string) => {
-    // An untracked file is a change, as it is to VS Code. Only whether there is one matters, so an
-    // untracked folder is not looked into.
-    const status = parseStatus(await git(root, ["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=normal"]));
-    // Where VS Code looks for a merge or a rebase under way.
-    const left = (name: string) => existsSync(join(root, ".git", name));
-    return {
-      root,
-      name: basename(root),
-      branch: status.branch,
-      head: status.head,
-      upstream: status.upstream,
-      ahead: status.ahead,
-      behind: status.behind,
-      changed: status.changes.length > 0,
-      staged: status.staged.length > 0,
-      merging: left("MERGE_HEAD") || ((left("rebase-apply") || left("rebase-merge")) && left("REBASE_HEAD")),
-    };
+    const name = basename(root);
+    try {
+      // An untracked file is a change, as it is to VS Code. Only whether there is one matters, so an
+      // untracked folder is not looked into.
+      const status = parseStatus((await porcelain(root, "normal")).out);
+      // Where VS Code looks for a merge or a rebase under way.
+      const left = (file: string) => existsSync(join(root, ".git", file));
+      return {
+        root,
+        name,
+        branch: status.branch,
+        head: status.head,
+        upstream: status.upstream,
+        ahead: status.ahead,
+        behind: status.behind,
+        changed: status.changes.length > 0,
+        staged: status.staged.length > 0,
+        merging: left("MERGE_HEAD") || ((left("rebase-apply") || left("rebase-merge")) && left("REBASE_HEAD")),
+        failed: null,
+      };
+    } catch (error) {
+      // One repository git cannot read does not hide the others: it is listed with why.
+      return { root, name, branch: null, head: null, upstream: null, ahead: 0, behind: 0, changed: false, staged: false, merging: false, failed: (error as Error).message };
+    }
   };
   const inside = (root: string) => root === folder || root.startsWith(folder + sep);
   const parents = settings["git.openRepositoryInParentFolders"];

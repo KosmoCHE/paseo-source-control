@@ -1,11 +1,11 @@
 // The working tree: the commit box, and the files that are staged, changed or in conflict. While the
 // files scroll, the title of their group and the folders they are in stay at the top, as in VS Code.
 
-import { Icon, Modal } from "@getpaseo/plugin/client/ui";
-import { useState } from "react";
+import { Icon, Modal, useToast } from "@getpaseo/plugin/client/ui";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { Pressable, TextInput, View } from "react-native";
-import { commitRpc, discardRpc, stageRpc, unstageRpc } from "../shared/git";
+import { commitRpc, discardRpc, ignoreRpc, stageRpc, unstageRpc } from "../shared/git";
 import type { DiffSource, FileChange, Status } from "../shared/git";
 import * as codicon from "./codicons";
 import { showDiff } from "./diffTab";
@@ -18,6 +18,7 @@ import { Heading, IconButton, T, toggle, useHint, useHost, useMenu } from "./ui"
 import type { MenuItem } from "./ui";
 
 const drafts = new Map<string, string>(); // repository → the message being written; outlives the panel, not the app
+const warned = new Set<string>(); // repositories told they have too many changes: as in VS Code, once while the app runs
 
 /** Something that cannot be undone, waiting for a yes. */
 interface Question {
@@ -119,6 +120,7 @@ export function Changes({ cwd, workspaceId, status, folded, onFold }: Props) {
         placeholderTextColor={c.foregroundMuted}
         style={{ minHeight: 56, padding: 6, borderWidth: 1, borderRadius: 4, borderColor: c.border, backgroundColor: c.surface2, color: c.foreground, fontSize: text, textAlignVertical: "top" }}
       />
+      {status.cutAt !== null && <TooMany cwd={cwd} cutAt={status.cutAt} hugeFolders={status.hugeFolders} />}
       <CommitButton
         enabled={canCommit}
         onCommit={() => send(false)}
@@ -187,6 +189,43 @@ export function Changes({ cwd, workspaceId, status, folded, onFold }: Props) {
         </Modal.Content>
       </Modal>
     </>
+  );
+}
+
+/**
+ * What VS Code says when git status was cut short: a warning under the commit box while it lasts, and a notification
+ * once. Where it would offer to add node_modules to .gitignore, the offer is a button here.
+ */
+function TooMany({ cwd, cutAt, hugeFolders }: { cwd: string; cutAt: number; hugeFolders: string[] }) {
+  const { c, small } = useHost();
+  const toast = useToast();
+  useEffect(() => {
+    if (warned.has(cwd)) return;
+    warned.add(cwd);
+    toast.show(`The git repository at "${cwd}" has too many active changes, only a subset of Git features will be enabled.`, { variant: "warning" });
+  }, [cwd]);
+  return (
+    <View style={{ gap: 4, padding: 6, borderWidth: 1, borderRadius: 4, borderColor: c.statusWarning }}>
+      <T size={small}>{`Too many changes were detected. Only the first ${cutAt} changes will be shown below.`}</T>
+      {hugeFolders.map((folder) => (
+        <IgnoreFolder key={folder} cwd={cwd} folder={folder} />
+      ))}
+    </View>
+  );
+}
+
+function IgnoreFolder({ cwd, folder }: { cwd: string; folder: string }) {
+  const { c, small } = useHost();
+  const ignore = useCommand(ignoreRpc, cwd);
+  return (
+    <Pressable
+      {...useHint(`Add "${folder}" to the .gitignore at the repository's root`)}
+      accessibilityRole="button"
+      onPress={ignore.isPending ? undefined : () => ignore.mutate({ paths: [folder] })}
+      style={{ alignSelf: "flex-start" }}
+    >
+      <T size={small} color={c.accent}>{`Add "${folder}" to .gitignore`}</T>
+    </Pressable>
   );
 }
 

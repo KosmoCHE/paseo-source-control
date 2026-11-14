@@ -5,13 +5,14 @@
 import type { PluginTab, PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
 import { useRpc, useTabState, useWorkspace } from "@getpaseo/plugin/client";
 import { Loading } from "@getpaseo/plugin/client/ui";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { FlatList, Pressable, View } from "react-native";
 import { z } from "zod";
 import { logRpc, repositoriesRpc, scopeSchema } from "../shared/git";
 import type { Commit, Repository, Scope } from "../shared/git";
 import { Changes } from "./Changes";
+import * as codicon from "./codicons";
 import { AutoFetch, key, useStatus } from "./git";
 import { CommitItem, GraphActions } from "./Graph";
 import type { Followed } from "./Graph";
@@ -20,7 +21,7 @@ import { FileOpener } from "./openFile";
 import { withPending } from "./pending";
 import { Repositories } from "./Repositories";
 import { Split, sizesSchema } from "./Split";
-import { HostProvider, Notice, PanelRoot, T, toggle, useHost } from "./ui";
+import { HostProvider, IconButton, Notice, PanelRoot, T, toggle, useHost } from "./ui";
 
 const PAGE = 200; // commits read at first, and added by each "Load more"
 const NONE: Commit[] = [];
@@ -52,6 +53,7 @@ function Workspace({ directory, workspaceId, tab }: { directory: string; workspa
   const { c } = useHost();
   const [view, setView] = useTabState(tab, viewSchema, VIEW);
   const read = useRpc(repositoriesRpc);
+  const queries = useQueryClient();
   const found = useQuery({ queryKey: key("repositories", directory), queryFn: () => read({ cwd: directory }), refetchInterval: 10_000 });
   if (!found.data) return found.error ? <Notice failed>{found.error.message}</Notice> : <Loading />;
 
@@ -85,7 +87,12 @@ function Workspace({ directory, workspaceId, tab }: { directory: string; workspa
           count: list.length,
           body: <Repositories list={list} selected={selected} folded={folded.repositories} onSelect={(root) => setView({ ...view, selected: root })} />,
         }}
-        changes={{ ...section("Changes"), body: !folded.changes && <WorkingTree key={cwd} cwd={cwd} workspaceId={workspaceId} folded={view.folded} onFold={fold} /> }}
+        changes={{
+          ...section("Changes"),
+          // VS Code's Refresh: the only way to read a repository with too many changes again without a command.
+          actions: <IconButton icon={codicon.refresh} label="Refresh" onPress={() => void queries.invalidateQueries({ queryKey: key() })} />,
+          body: !folded.changes && <WorkingTree key={cwd} cwd={cwd} workspaceId={workspaceId} folded={view.folded} onFold={fold} />,
+        }}
         graph={{
           ...section("Graph"),
           actions: <GraphActions cwd={cwd} scope={view.scope} onScope={(scope) => setView({ ...view, scope })} />,

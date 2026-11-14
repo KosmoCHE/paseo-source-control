@@ -44,6 +44,7 @@ export const repositorySchema = z.object({
   changed: z.boolean(),
   staged: z.boolean(),
   merging: z.boolean(),
+  failed: z.string().nullable(), // why git could not read it; the others are listed all the same
 });
 export type Repository = z.infer<typeof repositorySchema>;
 
@@ -72,6 +73,9 @@ export const statusRpc = defineRpc({
     staged: z.array(fileSchema),
     changes: z.array(fileSchema), // unstaged and untracked
     refs: z.string(), // changes whenever any ref moves: the history is stale
+    // As in VS Code, git status is read for so many files at most: set when there were more, and only that many are listed.
+    cutAt: z.number().nullable(),
+    hugeFolders: z.array(z.string()), // then, the folders VS Code offers to add to .gitignore: node_modules, when git does not ignore it
   }),
 });
 export type Status = z.infer<typeof statusRpc.output>;
@@ -132,6 +136,9 @@ export const stageRpc = defineRpc({ name: "git.stage", input: files, output: not
 export const unstageRpc = defineRpc({ name: "git.unstage", input: files, output: nothing });
 /** Throws away unstaged edits, and deletes untracked files. */
 export const discardRpc = defineRpc({ name: "git.discard", input: files, output: nothing });
+
+/** Adds paths, relative to the repository's root, to its .gitignore. */
+export const ignoreRpc = defineRpc({ name: "git.ignore", input: z.object({ cwd: z.string(), paths: z.array(z.string()).min(1) }), output: nothing });
 
 export const commitRpc = defineRpc({
   name: "git.commit",

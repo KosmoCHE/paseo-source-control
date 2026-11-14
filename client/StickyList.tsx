@@ -1,11 +1,11 @@
 // A scrolling list whose rows that hold others stay at its top while what they hold scrolls under them, as in VS Code's
-// sticky scroll.
+// sticky scroll. As in VS Code's lists, only the rows in view are drawn: a repository can have thousands of changes.
 //
 // The kept rows are drawn in a box that the ScrollView itself holds at its top (`stickyHeaderIndices`), so it stays put
 // without waiting on the scroll events, and the wheel and a finger dragged over it still scroll the list. Which rows the
 // box shows follows the scroll position.
 
-import { Fragment, useMemo, useRef, useState } from "react";
+import { Fragment, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { ScrollView, View } from "react-native";
 import { held } from "./sticky";
@@ -13,6 +13,7 @@ import type { Row } from "./sticky";
 import { isDark, useHost } from "./ui";
 
 const SHADOW = 3; // under the kept rows, as VS Code draws it
+const OVERSCAN = 10; // rows drawn past each edge of the view, so that scrolling does not show blank space first
 
 /** `head` scrolls away above the rows; every row is `row` tall. */
 export function StickyList({ head, rows }: { head: ReactNode; rows: Row[] }) {
@@ -21,8 +22,10 @@ export function StickyList({ head, rows }: { head: ReactNode; rows: Row[] }) {
   const [scrolled, setScrolled] = useState(0);
   const [headHeight, setHeadHeight] = useState(0);
   const [viewHeight, setViewHeight] = useState(0);
-  const body = useMemo(() => rows.map((item) => <Fragment key={item.key}>{item.render(item.onPress)}</Fragment>), [rows]);
-  const kept = held(rows, scrolled - headHeight, row, viewHeight);
+  const top = scrolled - headHeight; // how far the first row is above the top of the view
+  const first = Math.max(0, Math.floor(top / row) - OVERSCAN);
+  const last = Math.max(first, Math.min(rows.length, Math.ceil((top + viewHeight) / row) + OVERSCAN));
+  const kept = held(rows, top, row, viewHeight);
   const bottom = Math.max(0, ...kept.map(({ top }) => top + row));
   const height = kept.length ? bottom + SHADOW : 0;
   return (
@@ -60,7 +63,12 @@ export function StickyList({ head, rows }: { head: ReactNode; rows: Row[] }) {
       <View style={{ marginTop: -height }} onLayout={(event) => setHeadHeight(event.nativeEvent.layout.height)}>
         {head}
       </View>
-      {body}
+      {/* The rows out of view are room only. */}
+      <View style={{ height: first * row }} />
+      {rows.slice(first, last).map((item) => (
+        <Fragment key={item.key}>{item.render(item.onPress)}</Fragment>
+      ))}
+      <View style={{ height: (rows.length - last) * row }} />
     </ScrollView>
   );
 }

@@ -34,14 +34,21 @@ export function Repositories({ list, selected, folded, onSelect }: Props) {
             <T lines={1} weight={chosen ? "600" : undefined} style={{ flex: 1, minWidth: 0 }}>
               {repository.name}
             </T>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 3, flexShrink: 0, maxWidth: "60%" }}>
-              <Icon icon={branchIcon(repository)} size={small + 2} color={c.foregroundMuted} />
-              <T size={small} color={c.foregroundMuted} lines={1} style={{ flexShrink: 1, minWidth: 0 }}>
-                {branchLabel(repository)}
+            {repository.failed !== null ? (
+              // Selected, the repository says it in full where its changes would be.
+              <T size={small} color={c.statusDanger} lines={1} style={{ flexShrink: 1, minWidth: 0, maxWidth: "60%" }}>
+                {repository.failed}
               </T>
-              {/* What a pull would bring and a push would send, as VS Code counts them beside the branch. */}
-              {(repository.ahead > 0 || repository.behind > 0) && <T size={small} color={c.foregroundMuted}>{` ${repository.behind}↓ ${repository.ahead}↑`}</T>}
-            </View>
+            ) : (
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 3, flexShrink: 0, maxWidth: "60%" }}>
+                <Icon icon={branchIcon(repository)} size={small + 2} color={c.foregroundMuted} />
+                <T size={small} color={c.foregroundMuted} lines={1} style={{ flexShrink: 1, minWidth: 0 }}>
+                  {branchLabel(repository)}
+                </T>
+                {/* What a pull would bring and a push would send, as VS Code counts them beside the branch. */}
+                {(repository.ahead > 0 || repository.behind > 0) && <T size={small} color={c.foregroundMuted}>{` ${repository.behind}↓ ${repository.ahead}↑`}</T>}
+              </View>
+            )}
           </Pressable>
         );
       })}

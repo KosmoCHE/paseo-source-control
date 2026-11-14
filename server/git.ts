@@ -1,7 +1,10 @@
 // Runs git for the panel. Every handler takes the repository's directory and shells out.
 
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
+import { appendFile, readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import type { RpcInput, RpcOutput } from "@getpaseo/plugin";
 import type {
@@ -12,6 +15,7 @@ import type {
   compareRpc,
   diffRpc,
   discardRpc,
+  ignoreRpc,
   logRpc,
   showRpc,
   stageRpc,
@@ -50,6 +54,23 @@ export async function git(cwd: string, args: string[], { accept = [], timeout }:
 
 /** A rename is two paths to git. */
 const pathsOf = (files: FileChange[]) => files.flatMap((file) => (file.from ? [file.from, file.path] : [file.path]));
+
+const MAX_CLI_LENGTH = 30_000; // VS Code's: past some length a command line is cut short (microsoft/vscode#65693)
+
+/** Runs `git <args> -- <paths>` as many times as it takes to keep each command line under that length, as VS Code does. */
+async function onPaths(cwd: string, args: string[], paths: string[]) {
+  let chunk: string[] = [];
+  let length = 0;
+  for (const path of paths) {
+    if (chunk.length && length + path.length > MAX_CLI_LENGTH) {
+      await git(cwd, [...args, "--", ...chunk]);
+      [chunk, length] = [[], 0];
+    }
+    chunk.push(path);
+    length += path.length;
+  }
+  if (chunk.length) await git(cwd, [...args, "--", ...chunk]);
+}
 
 // --- working tree ---------------------------------------------------------------
 
@@ -96,16 +117,80 @@ export function parseStatus(out: string) {
   return status;
 }
 
+const STATUS_LIMIT = 10_000; // VS Code's git.statusLimit
+
+/**
+ * Reads `git status --porcelain=v2 --branch -z` as it comes, and stops git, as VS Code does, once more than STATUS_LIMIT
+ * files are listed: a folder of untracked files can hold hundreds of thousands, and listing them all chokes the panel.
+ * What is returned ends with the last file within the limit; `cut` tells whether files were left out.
+ */
+export function porcelain(cwd: string, untracked: "all" | "normal"): Promise<{ out: string; cut: boolean }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn("git", ["status", "--porcelain=v2", "--branch", "-z", `--untracked-files=${untracked}`], { cwd, env: ENV });
+    let out = "";
+    let read = 0; // how much of `out` has been gone through
+    let kept = 0; // where the last file within the limit ends
+    let files = 0;
+    let renamed = false; // the next field is the old path of a rename, which ends its entry
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string) => (stderr += chunk));
+    child.stdout.on("data", (chunk: string) => {
+      out += chunk;
+      for (let end = out.indexOf("\0", read); end !== -1; end = out.indexOf("\0", read)) {
+        const kind = out.slice(read, read + 2);
+        read = end + 1;
+        if (renamed) renamed = false;
+        else if (kind[0] === "#") continue; // a line about the branch
+        else if (kind === "2 ") {
+          renamed = true;
+          continue;
+        }
+        if (++files <= STATUS_LIMIT) kept = read;
+        else {
+          child.stdout.removeAllListeners("data");
+          child.kill();
+          resolve({ out: out.slice(0, kept), cut: true });
+          return;
+        }
+      }
+    });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (files > STATUS_LIMIT) return; // stopped on purpose
+      if (code === 0) resolve({ out, cut: false });
+      else reject(new Error(stderr.trim() || `git status exited with code ${code}`));
+    });
+  });
+}
+
+const HUGE = ["node_modules"]; // VS Code's Repository.KnownHugeFolderNames
+
+/** What VS Code offers to ignore when a repository has too many changes: the folders of HUGE at its root that git does not ignore. */
+async function hugeFolders(cwd: string) {
+  const there = HUGE.filter((name) => existsSync(join(cwd, name)));
+  if (!there.length) return [];
+  const ignored = (await git(cwd, ["check-ignore", "--", ...there], { accept: [1] })).split("\n");
+  return there.filter((name) => !ignored.includes(name));
+}
+
 export async function status({ cwd }: RpcInput<typeof statusRpc>): Promise<RpcOutput<typeof statusRpc>> {
-  const [porcelain, all] = await Promise.all([
-    git(cwd, ["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all"]),
-    git(cwd, ["for-each-ref", "--format=%(objectname) %(refname)"]),
-  ]);
-  const now = parseStatus(porcelain);
+  const [{ out, cut }, all] = await Promise.all([porcelain(cwd, "all"), git(cwd, ["for-each-ref", "--format=%(objectname) %(refname)"])]);
+  const now = parseStatus(out);
   const refs = createHash("sha1").update(all).digest("hex");
   // A branch without a commit yet has no reflog to read.
   const base = now.branch && now.head ? await knownBase(cwd, now.branch, refs) : null;
-  return { ...now, base: base === now.upstream ? null : base, refs };
+  return { ...now, base: base === now.upstream ? null : base, refs, cutAt: cut ? STATUS_LIMIT : null, hugeFolders: cut ? await hugeFolders(cwd) : [] };
+}
+
+/** Adds paths to the repository's .gitignore, a line each, as VS Code's Add to .gitignore writes them. */
+export async function ignore({ cwd, paths }: RpcInput<typeof ignoreRpc>) {
+  const file = join(cwd, ".gitignore");
+  const before = existsSync(file) ? await readFile(file, "utf8") : "";
+  const lines = paths.map((path) => path.replace(/\\|\[/g, (match) => (match === "\\" ? "/" : `\\${match}`)));
+  await appendFile(file, (before === "" || before.endsWith("\n") ? "" : "\n") + lines.join("\n") + "\n");
+  return {};
 }
 
 // --- the branch a branch was made from ------------------------------------------
@@ -168,22 +253,22 @@ async function knownBase(cwd: string, branch: string, refs: string) {
 }
 
 export async function stage({ cwd, files }: RpcInput<typeof stageRpc>) {
-  await git(cwd, ["add", "--all", "--", ...pathsOf(files)]);
+  await onPaths(cwd, ["add", "--all"], pathsOf(files));
   return {};
 }
 
 export async function unstage({ cwd, files }: RpcInput<typeof unstageRpc>) {
   const born = await git(cwd, ["rev-parse", "--verify", "--quiet", "HEAD"], { accept: [1] });
   // Before the first commit there is no HEAD to restore the index from.
-  await git(cwd, [...(born ? ["restore", "--staged"] : ["rm", "--cached", "--quiet"]), "--", ...pathsOf(files)]);
+  await onPaths(cwd, born ? ["restore", "--staged"] : ["rm", "--cached", "--quiet"], pathsOf(files));
   return {};
 }
 
 export async function discard({ cwd, files }: RpcInput<typeof discardRpc>) {
   const untracked = files.filter((file) => file.status === "?");
   const tracked = files.filter((file) => file.status !== "?");
-  if (tracked.length) await git(cwd, ["restore", "--worktree", "--", ...pathsOf(tracked)]);
-  if (untracked.length) await git(cwd, ["clean", "--force", "--quiet", "--", ...pathsOf(untracked)]);
+  if (tracked.length) await onPaths(cwd, ["restore", "--worktree"], pathsOf(tracked));
+  if (untracked.length) await onPaths(cwd, ["clean", "--force", "--quiet"], pathsOf(untracked));
   return {};
 }
 

@@ -25,11 +25,16 @@ function tidy(folder: Folder): Folder {
 /** The repository's root, holding the files at the top level and the folders of the rest. */
 export function tree(files: FileChange[]): Folder {
   const root: Folder = { name: "", path: "", folders: [], files: [] };
+  const made = new Map<string, Folder>(); // by path: a folder can hold thousands of others
   for (const file of files) {
     let folder = root;
     for (const name of file.path.split("/").slice(0, -1)) {
-      let next = folder.folders.find((child) => child.name === name);
-      if (!next) folder.folders.push((next = { name, path: folder.path ? `${folder.path}/${name}` : name, folders: [], files: [] }));
+      const path = folder.path ? `${folder.path}/${name}` : name;
+      let next = made.get(path);
+      if (!next) {
+        made.set(path, (next = { name, path, folders: [], files: [] }));
+        folder.folders.push(next);
+      }
       folder = next;
     }
     folder.files.push(file);

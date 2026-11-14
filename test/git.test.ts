@@ -2,7 +2,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
@@ -16,7 +16,7 @@ Object.assign(process.env, {
   GIT_COMMITTER_NAME: "Ada",
   GIT_COMMITTER_EMAIL: "ada@example.com",
 });
-const { baseOf, commit, compare, diff, discard, log, show, stage, status, unstage } = await import("../server/git.ts");
+const { baseOf, commit, compare, diff, discard, ignore, log, show, stage, status, unstage } = await import("../server/git.ts");
 
 function repository(t: TestContext) {
   const cwd = mkdtempSync(join(tmpdir(), "source-control-"));
@@ -293,4 +293,35 @@ test("git's own message comes back when it refuses", async (t) => {
   const { cwd } = repository(t);
   await assert.rejects(commit({ cwd, message: "nothing staged", amend: false }), /nothing to commit|no changes added|Initial commit/i);
   await assert.rejects(status({ cwd: tmpdir() }), /not a git repository/);
+});
+
+test("as in VS Code, no more than 10000 files are listed, and an unignored node_modules is offered to be ignored", async (t) => {
+  const { cwd, write } = repository(t);
+  mkdirSync(join(cwd, "node_modules"));
+  for (let n = 0; n <= 10_000; n++) write(`node_modules/file ${n}.txt`, "");
+
+  let now = await status({ cwd });
+  assert.equal(now.cutAt, 10_000);
+  assert.equal(now.changes.length, 10_000);
+  assert.deepEqual(now.hugeFolders, ["node_modules"]);
+
+  await ignore({ cwd, paths: ["node_modules"] });
+  assert.equal(readFileSync(join(cwd, ".gitignore"), "utf8"), "node_modules\n");
+  now = await status({ cwd });
+  assert.deepEqual([now.cutAt, now.changes, now.hugeFolders], [null, [{ path: ".gitignore", status: "?" }], []]);
+});
+
+test("a .gitignore without a newline at its end gets one before what is added", async (t) => {
+  const { cwd, write } = repository(t);
+  write(".gitignore", "dist");
+  await ignore({ cwd, paths: ["node_modules", "a[1].txt"] });
+  assert.equal(readFileSync(join(cwd, ".gitignore"), "utf8"), "dist\nnode_modules\na\\[1].txt\n");
+});
+
+test("more paths than one command line holds are staged a part at a time", async (t) => {
+  const { cwd, git, write } = repository(t);
+  const long = "x".repeat(100);
+  for (let n = 0; n < 400; n++) write(`${long}-${n}.txt`, ""); // 40000 characters of paths
+  await stage({ cwd, files: (await status({ cwd })).changes });
+  assert.equal(git("diff", "--cached", "--name-only").split("\n").length, 400);
 });

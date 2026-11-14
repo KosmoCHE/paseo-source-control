@@ -8,7 +8,7 @@ The graph draws one row per commit with its branch lanes, merges, branch names, 
 
 Selecting a file anywhere in the panel opens its diff in a workspace tab; an untracked file opens in Paseo's file tab instead, on the desktop and in a browser. The three parts of the panel scroll separately under title bars that stay put, and each folds from its title bar. As in VS Code, the repository list is as tall as its repositories, ten at most (on a phone, a quarter of the panel at most), and the line between the working tree and the graph drags to resize them.
 
-The panel reads the selected repository again every three seconds, so commits made by agents appear on their own. As VS Code does with `git.autofetch` on, it fetches the selected repository when it shows it and every three minutes after, so commits pushed by others appear too.
+The panel reads the selected repository again every three seconds, so commits made by agents appear on their own. As in VS Code, a repository with more than 10000 changes lists the first 10000, says so under the commit box, and is read again only after a command, a fetch or Refresh. As VS Code does with `git.autofetch` on, it fetches the selected repository when it shows it and every three minutes after, so commits pushed by others appear too.
 
 Setup: the daemon needs `git` on its `PATH`, and Paseo 0.14.0 or later. Fetch, pull, push and the fetch every three minutes use the daemon's own git credentials and cannot answer a password prompt.
 

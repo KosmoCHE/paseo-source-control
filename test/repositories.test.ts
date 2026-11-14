@@ -45,7 +45,18 @@ test("the folder's own repository and those one level down", async (t) => {
 
   const [own] = (await repositories({ cwd: top })).repositories;
   // The repositories below are untracked folders to this one, and so changes.
-  assert.deepEqual(own, { root: top, name: top.slice(dirname(top).length + 1), branch: "main", head: null, upstream: null, ahead: 0, behind: 0, changed: true, staged: false, merging: false });
+  assert.deepEqual(own, { root: top, name: top.slice(dirname(top).length + 1), branch: "main", head: null, upstream: null, ahead: 0, behind: 0, changed: true, staged: false, merging: false, failed: null });
+});
+
+test("a repository git cannot read is listed with why, and does not hide the others", async (t) => {
+  const { repo, folder, at, list, top } = workspace(t);
+  repo("good");
+  folder("broken");
+  writeFileSync(at("broken/.git"), "gitdir: nowhere\n"); // a worktree whose repository is gone
+  assert.deepEqual((await list(".")).listed, ["broken", "good"]);
+  const [broken, good] = (await repositories({ cwd: top })).repositories;
+  assert.match(broken.failed!, /not a git repository/);
+  assert.equal(good.failed, null);
 });
 
 test("a folder inside a repository lists what is below it, and only offers the repository above", async (t) => {
