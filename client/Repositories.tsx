@@ -4,7 +4,7 @@ import { Icon } from "@getpaseo/plugin/client/ui";
 import { Pressable, ScrollView, View } from "react-native";
 import type { Repository } from "../shared/git";
 import * as codicon from "./codicons";
-import { T, Tint, useHost } from "./ui";
+import { T, Tint, useHost, useRowHover } from "./ui";
 
 interface Props {
   list: Repository[];
@@ -24,6 +24,7 @@ const reserved = (items: number) => 24 * Math.min(items, 2);
 
 export function Repositories({ list, selected, folded, onSelect }: Props) {
   const { c, row, small } = useHost();
+  const hover = useRowHover();
   return (
     <ScrollView>
       {(folded ? [selected] : list).map((repository) => {
@@ -35,7 +36,7 @@ export function Repositories({ list, selected, folded, onSelect }: Props) {
             accessibilityLabel={`Repository ${repository.name}`}
             accessibilityState={{ selected: chosen }}
             onPress={() => onSelect(repository.root)}
-            style={{ flexDirection: "row", alignItems: "center", gap: 6, height: row, paddingLeft: 27, paddingRight: 8 }}
+            style={(state) => [{ flexDirection: "row", alignItems: "center", gap: 6, height: row, paddingLeft: 27, paddingRight: 8 }, hover(state)]}
           >
             {chosen && <Tint color={c.accent} opacity={0.14} />}
             {/* As in VS Code, the selected repository is ticked once there is more than one to choose from. */}

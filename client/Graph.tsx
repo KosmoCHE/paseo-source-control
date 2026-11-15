@@ -20,7 +20,7 @@ import { key, useCommand } from "./git";
 import { width } from "./lanes";
 import type { Rail } from "./lanes";
 import type { Pending, Row } from "./pending";
-import { IconButton, Notice, T, Tint, isDark, useHint, useHost, useHoverCard } from "./ui";
+import { IconButton, Notice, T, Tint, isDark, useHint, useHost, useHoverCard, useRowHover } from "./ui";
 
 const LANE = 12; // between two lanes
 const LINE = 2;
@@ -173,6 +173,7 @@ interface ItemProps {
 /** A commit's row, or that of the changes to pull or to push, and under it its details while it is open. */
 export function CommitItem({ cwd, workspaceId, commit, rail, followed, open, onToggle }: ItemProps) {
   const { c, row, small } = useHost();
+  const rowHover = useRowHover();
   const head = commit.refs.some((ref) => ref.kind === "head");
   const kind = commit.pending ? "pending" : head ? "head" : commit.parents.length > 1 ? "merge" : "commit";
   // As in VS Code, a commit's message and the rest show on a card; the changes to pull or push have none.
@@ -185,7 +186,7 @@ export function CommitItem({ cwd, workspaceId, commit, rail, followed, open, onT
         accessibilityLabel={`${commit.subject}, ${commit.author}`}
         accessibilityState={{ expanded: open }}
         onPress={onToggle}
-        style={{ flexDirection: "row", alignItems: "center", height: row, paddingRight: 8 }}
+        style={(state) => [{ flexDirection: "row", alignItems: "center", height: row, paddingRight: 8 }, rowHover(state)]}
       >
         {open && <Tint color={c.accent} opacity={0.14} />}
         <Rails rail={rail} height={row} kind={kind} />

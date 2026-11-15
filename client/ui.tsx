@@ -6,7 +6,7 @@ import { Icon } from "@getpaseo/plugin/client/ui";
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
-import type { StyleProp, TextStyle } from "react-native";
+import type { PressableStateCallbackType, StyleProp, TextStyle } from "react-native";
 import * as codicon from "./codicons";
 import type { Codicon } from "./codicons";
 
@@ -78,6 +78,16 @@ export function T({ children, size, color, weight, mono, lines, selectable, styl
       {children}
     </Text>
   );
+}
+
+/**
+ * Colours a list row while the pointer is on it, as VS Code does with `list.hoverBackground` in Dark 2026 and Light 2026:
+ * the host gives plugins no colour for it, and VS Code's see through to whatever the row is on. Use as a Pressable's style.
+ */
+export function useRowHover() {
+  const { c } = useHost();
+  const colour = isDark(c.surface0) ? "#FFFFFF14" : "#00000014";
+  return ({ hovered }: PressableStateCallbackType & { hovered?: boolean }) => (hovered ? { backgroundColor: colour } : null);
 }
 
 /** A wash of colour behind a row: the theme has no translucent tokens. */

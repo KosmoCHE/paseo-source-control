@@ -26,7 +26,7 @@ Settings take VS Code's defaults. The workspace folder's `.vscode/settings.json`
 
 ## Colours
 
-The host's theme comes first: surfaces, text, borders and accents are Paseo's. Where the theme has no colour for something, VS Code's is used: the graph's lanes and its upstream and base branches, and the diff's lines and changed words, in the colours of VS Code's default themes, Dark 2026 and Light 2026.
+The host's theme comes first: surfaces, text, borders and accents are Paseo's. Where the theme has no colour for something, VS Code's is used: the graph's lanes and its upstream and base branches, the diff's lines and changed words, and the row under the pointer, in the colours of VS Code's default themes, Dark 2026 and Light 2026.
 
 ## Fonts
 
