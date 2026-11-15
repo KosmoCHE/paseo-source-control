@@ -261,7 +261,7 @@ function ActionButton({ action }: { action: Action }) {
         {...useHint(action.tooltip)}
         accessibilityRole="button"
         accessibilityLabel={action.title}
-        accessibilityState={{ disabled: !action.enabled }}
+        aria-disabled={!action.enabled}
         onPress={action.enabled ? action.onPress : undefined} // not the disabled prop: that would switch off hovering, and the hint with it
         style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 6, opacity: action.enabled ? 1 : 0.5 }}
       >

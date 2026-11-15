@@ -104,7 +104,7 @@ function FolderRow({ folder, shut, pad, onPress, onChevron, actions }: FolderPro
     <Pressable
       role="treeitem" // a row of a tree, as VS Code's are, its actions inside it
       accessibilityLabel={`Folder ${folder.path}`}
-      accessibilityState={{ expanded: !shut }}
+      aria-expanded={!shut}
       onPress={onPress}
       style={(state) => [line, { paddingLeft: pad }, hover(state)]}
     >

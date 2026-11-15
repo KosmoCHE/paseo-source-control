@@ -227,7 +227,7 @@ export function PanelRoot({ children }: { children: ReactNode }) {
                   key={item.label}
                   accessibilityRole="menuitem"
                   accessibilityLabel={item.label}
-                  accessibilityState={{ disabled: !item.enabled }}
+                  aria-disabled={!item.enabled}
                   disabled={!item.enabled}
                   onPress={() => {
                     show(null);
@@ -340,7 +340,11 @@ export function IconButton({ icon, label, hint, onPress, disabled, toggled }: { 
       {...useHint(hint ?? label)}
       accessibilityRole="button"
       accessibilityLabel={label}
-      accessibilityState={{ disabled, checked: toggled }}
+      aria-disabled={disabled}
+      // A toggle says whether it is on as VS Code's toggled actions do (actionViewItems.ts: aria-pressed); React Native
+      // has no aria-pressed, and reads it from accessibilityState.
+      {...({ "aria-pressed": toggled } as object)}
+      accessibilityState={{ checked: toggled }}
       hitSlop={4}
       onPress={disabled ? undefined : onPress} // not the disabled prop: that would switch off hovering, and the hint with it
       style={({ pressed }) => ({ padding: compact ? 6 : 3, borderRadius: 4, opacity: disabled ? 0.4 : pressed ? 0.6 : 1, backgroundColor: toggled ? c.surface2 : undefined })}
@@ -375,7 +379,7 @@ export function Heading({ title, folded, onFold, count, group, onChevron, childr
   );
   if (group)
     return (
-      <Pressable role="treeitem" accessibilityLabel={title} accessibilityState={{ expanded: !folded }} onPress={onFold} style={style}>
+      <Pressable role="treeitem" accessibilityLabel={title} aria-expanded={!folded} onPress={onFold} style={style}>
         <Chevron folded={folded} label={title} onPress={onChevron} />
         <T lines={1} style={{ flex: 1, minWidth: 0 }}>
           {title}
@@ -386,13 +390,7 @@ export function Heading({ title, folded, onFold, count, group, onChevron, childr
     );
   return (
     <View style={style}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={title}
-        accessibilityState={{ expanded: !folded }}
-        onPress={onFold}
-        style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0 }}
-      />
+      <Pressable accessibilityRole="button" accessibilityLabel={title} aria-expanded={!folded} onPress={onFold} style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0 }} />
       <View pointerEvents="none" aria-hidden style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 4 }}>
         <Chevron folded={folded} label={title} />
         <T size={small} weight="600" color={c.foregroundMuted} lines={1} style={{ flex: 1, minWidth: 0, textTransform: "uppercase" }}>

@@ -184,7 +184,7 @@ export function CommitItem({ cwd, workspaceId, commit, rail, followed, open, onT
         {...(commit.pending ? {} : hover)}
         accessibilityRole="button"
         accessibilityLabel={`${commit.subject}, ${commit.author}`}
-        accessibilityState={{ expanded: open }}
+        aria-expanded={open}
         onPress={onToggle}
         style={(state) => [{ flexDirection: "row", alignItems: "center", height: row, paddingRight: 8 }, rowHover(state)]}
       >

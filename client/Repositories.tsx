@@ -32,9 +32,9 @@ export function Repositories({ list, selected, folded, onSelect }: Props) {
         return (
           <Pressable
             key={repository.root}
-            accessibilityRole="button"
+            role="treeitem" // a row of a tree, as VS Code's repositories are
             accessibilityLabel={`Repository ${repository.name}`}
-            accessibilityState={{ selected: chosen }}
+            aria-selected={chosen}
             onPress={() => onSelect(repository.root)}
             style={(state) => [{ flexDirection: "row", alignItems: "center", gap: 6, height: row, paddingLeft: 27, paddingRight: 8 }, hover(state)]}
           >
