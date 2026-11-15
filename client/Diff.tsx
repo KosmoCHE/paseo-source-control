@@ -118,7 +118,9 @@ function Lines({ found, sideBySide }: { found: Shown; sideBySide: boolean }) {
 /**
  * A line's text, its changed stretches drawn in `colour`. VS Code colours a changed stretch the full height of its line
  * (decorations.css: `.cdr` is `height: 100%`); a stretch of text is coloured only as tall as its font, about 1.17 times
- * its size for Menlo, so it is padded out to the line.
+ * its size for Menlo, so it is padded out to the line. A stretch names the code font again: once an interface font is
+ * set, Paseo gives every element outside its own code views that font (apply-root-font.web.ts), and the stretch would
+ * take it instead of the line's.
  */
 function Marked({ text, marks, colour }: { text: string; marks: Marks; colour: string }) {
   const { code } = useHost();
@@ -128,7 +130,7 @@ function Marked({ text, marks, colour }: { text: string; marks: Marks; colour: s
   for (const [start, end] of marks) {
     if (start > at) parts.push(text.slice(at, start));
     parts.push(
-      <Text key={start} style={{ backgroundColor: colour, paddingVertical: fill }}>
+      <Text key={start} style={{ fontFamily: code.fontFamily, backgroundColor: colour, paddingVertical: fill }}>
         {text.slice(start, end)}
       </Text>,
     );
