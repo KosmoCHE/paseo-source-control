@@ -257,7 +257,8 @@ function Lines({ found, sideBySide, collapse }: { found: Found; sideBySide: bool
             setView(measures.view);
             measures.changed?.();
           }}
-          contentContainerStyle={{ paddingBottom: Math.max(0, view - code.lineHeight) }}
+          // A footer, not padding: the list's content is measured without its padding, and the ruler would miss the room.
+          ListFooterComponent={<View style={{ height: Math.max(0, view - code.lineHeight) }} />}
           onContentSizeChange={(_, height) => {
             measures.content = height;
             measures.changed?.();
