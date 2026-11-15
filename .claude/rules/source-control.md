@@ -1,6 +1,7 @@
 # Working on the Source Control plugin
 
 - Read `docs/design.md` before changing what the panel does. A new difference from VS Code goes into its table, with the reason.
+- Changing what the panel does means updating `docs/features.md`.
 - Take behaviour, wording, defaults and colours from VS Code 1.142.0's source (checkout command in `docs/design.md`), never from memory, and name what is copied in the code.
 - Never read VS Code's user-level settings. The workspace's `.vscode/settings.json` is read only for the settings the README lists.
 - No action switches or creates branches.
