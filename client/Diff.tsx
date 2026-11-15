@@ -526,20 +526,25 @@ function InlineLine({ row, width, revealed, onFold }: LineProps & { row: InlineR
   );
 }
 
-/** A row of the side-by-side view: the original on the left, the modified on the right. */
+/**
+ * A row of the side-by-side view: the original on the left, the modified on the right. In a change, a side with no
+ * line, or with a line that wraps onto fewer rows than the other's, is filled out below it.
+ */
 function PairLine({ row, width, revealed, onFold }: LineProps & { row: PairRow }) {
   const { c } = useHost();
   const colours = useColours();
-  const half = (cell: Cell | null, kind: "remove" | "add") =>
-    cell === null ? (
-      <View style={{ flex: 1, backgroundColor: colours.filler }} />
-    ) : (
-      <View style={{ flex: 1, flexDirection: "row", backgroundColor: row.changed ? (kind === "add" ? colours.insertedLine : colours.removedLine) : revealed ? colours.unchanged : undefined }}>
-        <LineNumber value={cell.number} width={width} />
-        <Indicator kind={row.changed ? kind : "same"} onFold={onFold} />
-        <Marked text={cell.text} marks={cell.marks} colour={kind === "add" ? colours.insertedText : colours.removedText} />
-      </View>
-    );
+  const half = (cell: Cell | null, kind: "remove" | "add") => (
+    <View style={{ flex: 1 }}>
+      {cell && (
+        <View style={{ flexDirection: "row", backgroundColor: row.changed ? (kind === "add" ? colours.insertedLine : colours.removedLine) : revealed ? colours.unchanged : undefined }}>
+          <LineNumber value={cell.number} width={width} />
+          <Indicator kind={row.changed ? kind : "same"} onFold={onFold} />
+          <Marked text={cell.text} marks={cell.marks} colour={kind === "add" ? colours.insertedText : colours.removedText} />
+        </View>
+      )}
+      {row.changed && <Filler gutter={width + 16} />}
+    </View>
+  );
   return (
     <View style={{ flexDirection: "row" }}>
       {half(row.left, "remove")}
@@ -547,6 +552,18 @@ function PairLine({ row, width, revealed, onFold }: LineProps & { row: PairRow }
       {half(row.right, "add")}
     </View>
   );
+}
+
+/**
+ * Where a side of a change has nothing to show: VS Code's diagonal fill (style.css: `.diagonal-fill`, in the colour
+ * diffEditor.diagonalFill), across the text but not the gutter, as VS Code draws it in a view zone beside the lines.
+ * React Native draws no repeating background, so it is flat off the web.
+ */
+function Filler({ gutter }: { gutter: number }) {
+  const { platform } = useHost();
+  const { filler } = useColours();
+  const stripes = `linear-gradient(-45deg, ${filler} 12.5%, #0000 12.5%, #0000 50%, ${filler} 50%, ${filler} 62.5%, #0000 62.5%, #0000 100%)`;
+  return <View style={[{ flex: 1, marginLeft: gutter }, platform === "web" ? ({ backgroundImage: stripes, backgroundSize: "8px 8px" } as object as ViewStyle) : { backgroundColor: filler }]} />;
 }
 
 /** What VS Code writes after a file's name in the title of its diff: the version shown, or the commit. */

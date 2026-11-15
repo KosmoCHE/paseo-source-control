@@ -57,6 +57,7 @@ Text is Paseo's, in its font and smoothed as Paseo smooths it. Code in the diff 
 | A region opened by hand folds again once a change above it or in it moves it | VS Code carries what is open through each edit; the panel knows a region by where it is |
 | The overview ruler places rows not yet drawn by the average height of those drawn | Long lines wrap, so a row's height is known once it is drawn, and only the rows near the view are drawn |
 | Phones have no overview ruler | A phone's diff is narrow, and a finger scrolls it |
+| Off the web, the side of a change with less to show is filled out flat, without VS Code's diagonal stripes | React Native has no repeating background to draw them with |
 | Commit waits for a message to be written | VS Code opens an editor for an empty message; the panel has none |
 | Amending a commit already pushed asks first | A pushed commit can then only be pushed by force |
 | Dialogs offer no "Always", "Never" or "Don't Show Again" | Those choices write the user's VS Code settings |
