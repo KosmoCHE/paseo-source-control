@@ -5,10 +5,10 @@ import type { PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
 import { useRpc } from "@getpaseo/plugin/client";
 import { Icon, Loading } from "@getpaseo/plugin/client/ui";
 import { useQuery } from "@tanstack/react-query";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ReactElement, ReactNode } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { FlatList, PanResponder, Pressable, Text, View } from "react-native";
-import type { PressableStateCallbackType, ViewStyle } from "react-native";
+import type { CellRendererProps, PressableStateCallbackType, ViewStyle } from "react-native";
 import { diffRpc } from "../shared/git";
 import type { DiffSource, FileChange, FileDiff } from "../shared/git";
 import * as codicon from "./codicons";
@@ -22,7 +22,7 @@ import { OverviewRuler } from "./OverviewRuler";
 import type { Measures } from "./OverviewRuler";
 import { fileName } from "./tree";
 import { HostProvider, IconButton, isDark, Notice, PanelRoot, T, useHint, useHost } from "./ui";
-import { fold, folded, regions, reveal } from "./unchanged";
+import { dragged, fold, folded, regions, reveal } from "./unchanged";
 import type { Hidden, Region, Revealed, Shown } from "./unchanged";
 
 export function DiffPanel({ theme, layout, workspaceId, tab }: PluginWorkspacePanelProps) {
@@ -156,8 +156,18 @@ function Lines({ found, sideBySide, collapse }: { found: Found; sideBySide: bool
         : rows,
     [rows, collapse, found.kind, unchanged, opened],
   );
-  const open = (index: number, change: (region: Region, shown: Shown) => Shown) =>
-    setOpened((before) => new Map(before).set(regionKey(unchanged[index]), change(unchanged[index], before.get(regionKey(unchanged[index])) ?? folded)));
+  // A region's bottom edge brings lines back under its bar with the lines after the region kept in place, as VS Code's
+  // does (_runWithLowerScrollAnchor): what is above moves up instead. `below` is how many showed there before.
+  const anchor = useRef<{ region: Region; below: number } | null>(null);
+  const open = (index: number, change: (region: Region, shown: Shown) => Shown, anchored = false) => {
+    const region = unchanged[index];
+    if (anchored) anchor.current ??= { region, below: (opened.get(regionKey(region)) ?? folded).bottom };
+    setOpened((before) => {
+      const was = before.get(regionKey(region)) ?? folded;
+      const next = change(region, was);
+      return next.top === was.top && next.bottom === was.bottom ? before : new Map(before).set(regionKey(region), next);
+    });
+  };
   const first = items.findIndex((item) => ("kind" in item ? item.kind !== "same" : "changed" in item && item.changed));
   const lines = found.kind === "file" ? found.lines.length : Math.max(found.original.length, found.modified.length);
   const digits = code.fontSize * 0.6 * String(lines).length + 12; // a column wide enough for the last line's number
@@ -173,26 +183,51 @@ function Lines({ found, sideBySide, collapse }: { found: Found; sideBySide: bool
   const keys = useMemo(() => items.map(keyOf), [items]);
   const spans = useMemo(() => changeSpans(items, removedRow, addedRow), [items]);
   const scrollTo = useCallback((offset: number) => list.current?.scrollToOffset({ offset: Math.max(0, Math.min(offset, measures.content - measures.view)), animated: false }), [measures]);
-  const measured = (item: Item, node: ReactElement) =>
-    ruler ? (
-      <View
-        onLayout={(event) => {
-          measures.heights.set(keyOf(item), event.nativeEvent.layout.height);
-          measures.changed?.();
-        }}
-      >
-        {node}
-      </View>
-    ) : (
-      node
-    );
+  const scrollBy = (delta: number) => {
+    measures.scrolled += delta; // at once: the next move may come before the scroll is told
+    list.current?.scrollToOffset({ offset: measures.scrolled, animated: false });
+  };
+
+  // How tall a region's line is drawn, under keyOf's key for a row the same in both versions; undefined until it is.
+  const lineKey = (region: Region, line: number) => `${sideBySide ? "" : "same"}${region.original + line}:${region.modified + line}`;
+  const lineHeight = (region: Region) => (line: number) => measures.heights.get(lineKey(region, line)) ?? code.lineHeight;
+  // Lines brought back under a bar scroll the diff by their height once drawn; until then, by one line each.
+  const guessed = useRef(new Map<string, number>()).current;
+  useLayoutEffect(() => {
+    if (!anchor.current) return;
+    const { region, below } = anchor.current;
+    anchor.current = null;
+    guessed.clear();
+    const now = (opened.get(regionKey(region)) ?? folded).bottom;
+    let delta = 0;
+    for (let n = Math.min(below, now); n < Math.max(below, now); n++) {
+      const line = region.length - 1 - n;
+      if (!measures.heights.has(lineKey(region, line))) guessed.set(lineKey(region, line), code.lineHeight);
+      delta += lineHeight(region)(line);
+    }
+    scrollBy(now > below ? delta : -delta);
+  }, [opened]);
+  const measure = (item: Item, height: number) => {
+    measures.heights.set(keyOf(item), height);
+    const guess = guessed.get(keyOf(item));
+    if (guess !== undefined && guessed.delete(keyOf(item))) scrollBy(height - guess);
+    measures.changed?.();
+  };
   const draw = (item: Item) => {
     if ("file" in item) return <FileLine number={item.number} text={item.file} width={digits} />;
     if ("hidden" in item) {
       const region = unchanged[item.hidden];
       const shown = opened.get(regionKey(region)) ?? folded;
       return (
-        <HiddenLines lines={item.lines} region={region} shown={shown} gutter={sideBySide ? digits + 16 : digits * 2 + 16} halves={sideBySide ? 2 : 1} open={(change) => open(item.hidden, change)} />
+        <HiddenLines
+          lines={item.lines}
+          region={region}
+          shown={shown}
+          height={lineHeight(region)}
+          gutter={sideBySide ? digits + 16 : digits * 2 + 16}
+          halves={sideBySide ? 2 : 1}
+          open={(change, anchored) => open(item.hidden, change, anchored)}
+        />
       );
     }
     const revealed = "region" in item;
@@ -227,12 +262,18 @@ function Lines({ found, sideBySide, collapse }: { found: Found; sideBySide: bool
             measures.scrolled = event.nativeEvent.contentOffset.y;
             measures.changed?.();
           }}
-          renderItem={({ item }) => measured(item, draw(item))}
+          CellRendererComponent={Cell}
+          renderItem={({ item }) => <View onLayout={(event) => measure(item, event.nativeEvent.layout.height)}>{draw(item)}</View>}
         />
         {ruler && <OverviewRuler keys={keys} spans={spans} measures={measures} colours={colours.ruler} scrollTo={scrollTo} />}
       </View>
     </>
   );
+}
+
+/** A row of the list; a folded region's is drawn over the row below, which the region's bottom edge reaches into. */
+function Cell({ item, style, ...props }: CellRendererProps<Item>) {
+  return <View {...props} style={[style, "hidden" in item && { zIndex: 1 }]} />;
 }
 
 /**
@@ -244,6 +285,7 @@ function HiddenLines({
   lines,
   region,
   shown,
+  height,
   gutter,
   halves,
   open,
@@ -251,9 +293,10 @@ function HiddenLines({
   lines: number;
   region: Region;
   shown: Shown;
+  height: (line: number) => number;
   gutter: number;
   halves: number;
-  open: (change: (region: Region, shown: Shown) => Shown) => void;
+  open: (change: (region: Region, shown: Shown) => Shown, anchored?: boolean) => void;
 }) {
   const { c } = useHost();
   const colours = useColours();
@@ -289,8 +332,8 @@ function HiddenLines({
       <DoublePress hint="Double click to unfold" onDouble={all}>
         <T size={13} color={c.foreground} lines={1}>{`${lines} hidden lines`}</T>
       </DoublePress>
-      <Edge edge="top" region={region} shown={shown} open={open} />
-      <Edge edge="bottom" region={region} shown={shown} open={open} />
+      <Edge edge="top" region={region} shown={shown} height={height} open={open} />
+      <Edge edge="bottom" region={region} shown={shown} height={height} open={open} />
     </View>
   );
   return (
@@ -331,17 +374,35 @@ function DoublePress({ hint, onDouble, children }: { hint: string; onDouble: () 
   );
 }
 
-/** A folded region's top or bottom edge: lit under the pointer and while dragged, its cursor saying which ways it can go. */
-function Edge({ edge, region, shown, open }: { edge: "top" | "bottom"; region: Region; shown: Shown; open: (change: (region: Region, shown: Shown) => Shown) => void }) {
-  const { c, code, platform } = useHost();
+/**
+ * A folded region's top or bottom edge, as VS Code's (style.css): 10 pixels to grab across the bar's border, 6 of them
+ * on the side the lines come from, lit 4 pixels across it under the pointer and while dragged, its cursor saying which
+ * ways it can go. The top edge brings lines back above the bar, which moves down with the pointer; the bottom edge
+ * brings them back below it, and the diff scrolls so that the bar moves up with the pointer.
+ */
+function Edge({
+  edge,
+  region,
+  shown,
+  height,
+  open,
+}: {
+  edge: "top" | "bottom";
+  region: Region;
+  shown: Shown;
+  height: (line: number) => number;
+  open: (change: (region: Region, shown: Shown) => Shown, anchored?: boolean) => void;
+}) {
+  const { c, platform } = useHost();
   const hint = useHint(edge === "top" ? "Click or drag to show more above" : "Click or drag to show more below");
   const [lit, setLit] = useState(false);
   const [dragging, setDragging] = useState(false);
-  const live = useRef({ shown, open });
-  live.current = { shown, open };
+  const live = useRef({ region, shown, height, open });
+  live.current = { region, shown, height, open };
   const responder = useMemo(() => {
     let from = 0;
     let moved = false;
+    const change = (next: (region: Region, shown: Shown) => Shown) => live.current.open(next, edge === "bottom");
     return PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onPanResponderTerminationRequest: () => false,
@@ -353,17 +414,16 @@ function Edge({ edge, region, shown, open }: { edge: "top" | "bottom"; region: R
       },
       onPanResponderMove: (_, gesture) => {
         moved ||= Math.abs(gesture.dy) > 2;
-        const lines = Math.round(gesture.dy / code.lineHeight);
-        live.current.open((region, shown) => reveal.to(region, shown, edge, edge === "top" ? from + lines : from - lines));
+        const count = dragged(live.current.region, edge, from, gesture.dy, live.current.height);
+        change((region, shown) => reveal.to(region, shown, edge, count));
       },
       onPanResponderRelease: () => {
         setDragging(false);
-        if (!moved) live.current.open(edge === "top" ? reveal.above : reveal.below);
+        if (!moved) change(edge === "top" ? reveal.above : reveal.below);
       },
       onPanResponderTerminate: () => setDragging(false),
     });
-  }, [edge, code.lineHeight]);
-  // The cursor of style.css: which ways the edge can still move.
+  }, [edge]);
   const back = shown[edge] > 0;
   const cursor = edge === "top" ? (back ? "ns-resize" : "s-resize") : back ? "ns-resize" : "n-resize";
   return (
@@ -371,12 +431,10 @@ function Edge({ edge, region, shown, open }: { edge: "top" | "bottom"; region: R
       ref={hint.ref}
       {...responder.panHandlers}
       {...({ onPointerEnter: () => (setLit(true), hint.onHoverIn()), onPointerLeave: () => (setLit(false), hint.onHoverOut()) } as object)}
-      style={[
-        { position: "absolute", left: 0, right: 0, height: 4, backgroundColor: lit || dragging ? c.accent : undefined },
-        edge === "top" ? { top: 0 } : { bottom: 0 },
-        platform === "web" ? ({ cursor } as object as ViewStyle) : null,
-      ]}
-    />
+      style={[{ position: "absolute", left: 0, right: 0, height: 10 }, edge === "top" ? { top: -6 } : { bottom: -4 }, platform === "web" ? ({ cursor } as object as ViewStyle) : null]}
+    >
+      <View style={{ marginTop: 4, height: 4, backgroundColor: lit || dragging ? c.accent : undefined }} />
+    </View>
   );
 }
 

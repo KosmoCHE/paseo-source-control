@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { inlineRows, pairRows } from "../client/diffRows.ts";
-import { fold, folded, regions, reveal } from "../client/unchanged.ts";
+import { dragged, fold, folded, regions, reveal } from "../client/unchanged.ts";
 
 const change = (original: [number, number], modified: [number, number]) => ({ original, modified, inner: [] });
 const lines = (count: number, from = 1) => Array.from({ length: count }, (_, n) => `line ${from + n}`);
@@ -74,6 +74,24 @@ test("a region opens 20 lines at a time from either edge, never more than it hol
   assert.deepEqual(reveal.all(region, { top: 5, bottom: 0 }), { top: 5, bottom: 25 });
   assert.deepEqual(reveal.to(region, { top: 0, bottom: 25 }, "top", 9), { top: 5, bottom: 25 });
   assert.deepEqual(reveal.to(region, folded, "bottom", -3), { top: 0, bottom: 0 });
+});
+
+test("a dragged edge takes a line as the pointer passes the middle of its row, however tall it is drawn", () => {
+  const region = { original: 1, modified: 1, length: 30 };
+  const line = () => 24;
+  // As VS Code's: the distance over the line height, rounded.
+  assert.equal(dragged(region, "top", 0, 30, line), 1);
+  assert.equal(dragged(region, "top", 0, 36, line), 2);
+  assert.equal(dragged(region, "top", 5, -40, line), 3);
+  // The bottom edge shows more as it goes up.
+  assert.equal(dragged(region, "bottom", 0, -50, line), 2);
+  assert.equal(dragged(region, "bottom", 2, 20, line), 1);
+  // Lines 0 and 1 wrap onto two rows: 60 pixels down passes line 0 (48) but not the middle of line 1.
+  const wrapped = (n: number) => (n < 2 ? 48 : 24);
+  assert.equal(dragged(region, "top", 0, 60, wrapped), 1);
+  assert.equal(dragged(region, "top", 0, 80, wrapped), 2);
+  // No further than the region holds.
+  assert.equal(dragged(region, "top", 0, 10000, line), 30);
 });
 
 test("the first line of a region opened in full is where it folds again", () => {

@@ -66,6 +66,21 @@ export const reveal = {
   },
 };
 
+/**
+ * How many lines show at a region's edge once it is dragged `distance` pixels down from where `from` showed: a line
+ * comes or goes as the pointer passes the middle of its row. VS Code divides the distance by the line height; lines
+ * wrap here, so each row counts as tall as `height` gives for its line's place in the region. Kept within the region
+ * by `reveal.to`.
+ */
+export function dragged(region: Region, edge: "top" | "bottom", from: number, distance: number, height: (line: number) => number) {
+  const nth = (n: number) => (edge === "top" ? n : region.length - 1 - n); // the n-th line in from the edge
+  let left = edge === "top" ? distance : -distance; // pixels toward the region's middle
+  let count = from;
+  while (left > 0 && count < region.length && left >= height(nth(count)) / 2) left -= height(nth(count++));
+  while (left < 0 && count > 0 && -left > height(nth(count - 1)) / 2) left += height(nth(--count));
+  return count;
+}
+
 export const isOpen = (region: Region, { top, bottom }: Shown) => top + bottom === region.length;
 
 /** A row standing for the folded lines of region `region`. */
