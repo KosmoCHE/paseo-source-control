@@ -52,6 +52,11 @@ Text is Paseo's, in its font and smoothed as Paseo smooths it. Code in the diff 
 | A commit's card shows above the graph, not beside its row | A plugin can draw nothing outside its panel; above the graph the card leaves every commit in view |
 | While a card shows, another commit's takes its place once the pointer has rested on it for 150 milliseconds, not at once | On its way up to the card the pointer crosses other commits |
 | The diff's code is 16 pixels, whatever size is set in Paseo or in VS Code | Paseo does not tell plugins its "Code size", and VS Code's settings are never read; 16 is chosen for this panel |
+| The switch that folds unchanged lines in the diff is kept by the diff tab | VS Code keeps it as a setting, `diffEditor.hideUnchangedRegions.enabled`, and the panel never writes VS Code's settings |
+| A folded region does not say which function or class it hides | VS Code takes those from the language's outline; a plugin has none |
+| A region opened by hand folds again once a change above it or in it moves it | VS Code carries what is open through each edit; the panel knows a region by where it is |
+| The overview ruler places rows not yet drawn by the average height of those drawn | Long lines wrap, so a row's height is known once it is drawn, and only the rows near the view are drawn |
+| Phones have no overview ruler | A phone's diff is narrow, and a finger scrolls it |
 | Commit waits for a message to be written | VS Code opens an editor for an empty message; the panel has none |
 | Amending a commit already pushed asks first | A pushed commit can then only be pushed by force |
 | Dialogs offer no "Always", "Never" or "Don't Show Again" | Those choices write the user's VS Code settings |
