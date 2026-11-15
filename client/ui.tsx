@@ -360,34 +360,52 @@ interface HeadingProps {
   children?: ReactNode; // its actions
 }
 
-/** The title bar of something that folds: a section of the panel, or a group of changes. */
+/**
+ * The title bar of something that folds: a section of the panel, or a group of changes. A group is a row of a tree, as
+ * VS Code's are (abstractTree.ts: "treeitem"), its actions inside it. A section's title bar is a button, as VS Code's
+ * pane header is (paneview.ts); its actions lie over that button rather than in it, since a button holds no other.
+ */
 export function Heading({ title, folded, onFold, count, group, onChevron, children }: HeadingProps) {
   const { c, row, small } = useHost();
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={title}
-      accessibilityState={{ expanded: !folded }}
-      onPress={onFold}
-      style={{ flexDirection: "row", alignItems: "center", gap: 4, height: row, paddingLeft: group ? 12 : 8, paddingRight: 8 }}
-    >
-      <Chevron folded={folded} label={title} onPress={onChevron} />
-      {group ? (
+  const style = { flexDirection: "row", alignItems: "center", gap: 4, height: row, paddingLeft: group ? 12 : 8, paddingRight: 8 } as const;
+  const number = count !== undefined && (
+    <T size={small} color={c.foregroundMuted} style={{ minWidth: 12, textAlign: "center" }}>
+      {String(count)}
+    </T>
+  );
+  if (group)
+    return (
+      <Pressable role="treeitem" accessibilityLabel={title} accessibilityState={{ expanded: !folded }} onPress={onFold} style={style}>
+        <Chevron folded={folded} label={title} onPress={onChevron} />
         <T lines={1} style={{ flex: 1, minWidth: 0 }}>
           {title}
         </T>
-      ) : (
+        {children}
+        {number}
+      </Pressable>
+    );
+  return (
+    <View style={style}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={title}
+        accessibilityState={{ expanded: !folded }}
+        onPress={onFold}
+        style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0 }}
+      />
+      <View pointerEvents="none" aria-hidden style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 4 }}>
+        <Chevron folded={folded} label={title} />
         <T size={small} weight="600" color={c.foregroundMuted} lines={1} style={{ flex: 1, minWidth: 0, textTransform: "uppercase" }}>
           {title}
         </T>
-      )}
+      </View>
       {children}
-      {count !== undefined && (
-        <T size={small} color={c.foregroundMuted} style={{ minWidth: 12, textAlign: "center" }}>
-          {String(count)}
-        </T>
+      {number && (
+        <View pointerEvents="none" aria-hidden>
+          {number}
+        </View>
       )}
-    </Pressable>
+    </View>
   );
 }
 

@@ -102,7 +102,7 @@ function FolderRow({ folder, shut, pad, onPress, onChevron, actions }: FolderPro
   const inside = everyFile(folder);
   return (
     <Pressable
-      accessibilityRole="button"
+      role="treeitem" // a row of a tree, as VS Code's are, its actions inside it
       accessibilityLabel={`Folder ${folder.path}`}
       accessibilityState={{ expanded: !shut }}
       onPress={onPress}
@@ -136,7 +136,7 @@ function FileRow({ file, pad, onPress, actions }: { file: FileChange; pad: numbe
   const { letter, color } = mark(file.status, c);
   return (
     <Pressable
-      accessibilityRole="button"
+      role="treeitem"
       accessibilityLabel={`${file.path}, ${letter}`}
       onPress={onPress}
       // A file lines up with the names of the folders beside it, past their chevrons.
