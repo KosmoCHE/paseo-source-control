@@ -97,8 +97,6 @@ npm run preview    # then open http://127.0.0.1:4173/?cwd=/path/to/a/repository
 
 The preview renders the real panel under React Native Web with stand-ins for the Paseo host, and answers its RPCs with the plugin's own daemon half, so the buttons act on the repository you point it at. Address parameters: `theme=light`, `compact`, `width=<sidebar width>`, and `press=<button name>|<button name>` to click through to a state.
 
-The panel's icons are VS Code's own, from [vscode-codicons](https://github.com/microsoft/vscode-codicons) (CC BY 4.0). Only the icons of the two tabs, which sit among Paseo's own, are Lucide's.
-
 ## Limits
 
 - The graph draws at most ten lanes side by side; lanes further right are cut off.
@@ -106,3 +104,10 @@ The panel's icons are VS Code's own, from [vscode-codicons](https://github.com/m
 - Open File is offered on the desktop and in a browser only. A plugin has no call yet to open a file in Paseo's file tab, so the panel presses a hidden Markdown link to the file instead, which needs a web page ([issue #1](https://github.com/KosmoCHE/paseo-source-control/issues/1)).
 - Fetch, pull, push and the fetch every three minutes run with the daemon's git credentials and cannot answer a password prompt.
 - Switching and creating branches is left to the agents: the panel has no such actions.
+
+## Credits and licence
+
+The plugin is under the MIT License, in [LICENSE](LICENSE), except for its icons.
+
+- The panel's icons are VS Code's codicons, © Microsoft Corporation, from [vscode-codicons](https://github.com/microsoft/vscode-codicons), under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Only each icon's SVG paths are kept, in an inline SVG whose colour Paseo sets. `client/codicons.ts`, which holds them, is not covered by the MIT License. The icons of the two tabs, which sit among Paseo's own, are Lucide's.
+- Parts of `server/git.ts`, `server/repositories.ts` and `client/ago.ts` are adapted from [VS Code](https://github.com/microsoft/vscode) 1.142.0, Copyright (c) Microsoft Corporation, under the [MIT License](https://github.com/microsoft/vscode/blob/1.142.0/LICENSE.txt). Each file names what it took.

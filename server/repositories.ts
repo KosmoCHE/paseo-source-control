@@ -7,6 +7,9 @@
 // - none of those in `git.ignoredRepositories`;
 // - a repository whose root lies above the folder only under
 //   `git.openRepositoryInParentFolders: "always"`. Otherwise it is offered, unless "never".
+//
+// `scan` is adapted from traverseWorkspaceFolder in VS Code 1.142.0's extensions/git/src/model.ts.
+// Copyright (c) Microsoft Corporation. Licensed under the MIT License: https://github.com/microsoft/vscode/blob/1.142.0/LICENSE.txt
 
 import { existsSync } from "node:fs";
 import { readFile, readdir, realpath } from "node:fs/promises";
