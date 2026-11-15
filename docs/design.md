@@ -34,7 +34,7 @@ Text is Paseo's, in its font and smoothed as Paseo smooths it. Code in the diff 
 
 ## What the host allows
 
-- **A panel, and nothing outside it.** The plugin API offers no popover or overlay, only a modal that covers the window. Dialogs are that modal; hints and menus are drawn inside the panel, over its own content.
+- **A panel, and nothing outside it.** The plugin API offers no popover or overlay, only a modal that covers the window. Dialogs are that modal; hints, menus and cards are drawn inside the panel, over its own content.
 - **No editor.** There is no gutter to mark changes in, no merge editor, no editor to write a commit message in. The diff is a workspace tab the plugin draws itself.
 - **No status bar and no badge.** The repository list carries the branch and its sync state that VS Code puts in the status bar.
 - **Phones.** In the compact layout rows are taller, and the repository list takes at most a quarter of the panel.
@@ -49,6 +49,8 @@ Text is Paseo's, in its font and smoothed as Paseo smooths it. Code in the diff 
 | No action switches or creates branches | Branches are the agents' to manage |
 | The Repositories section always shows | With no status bar, it is the only place the branch and its sync state show |
 | Long lines wrap in the diff | The diff tab is often narrow |
+| A commit's card shows above the graph, not beside its row | A plugin can draw nothing outside its panel; above the graph the card leaves every commit in view |
+| While a card shows, another commit's takes its place once the pointer has rested on it for 150 milliseconds, not at once | On its way up to the card the pointer crosses other commits |
 | The diff's code is 16 pixels, whatever size is set in Paseo or in VS Code | Paseo does not tell plugins its "Code size", and VS Code's settings are never read; 16 is chosen for this panel |
 | Commit waits for a message to be written | VS Code opens an editor for an empty message; the panel has none |
 | Amending a commit already pushed asks first | A pushed commit can then only be pushed by force |

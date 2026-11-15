@@ -8,7 +8,7 @@ import type { ReactNode } from "react";
 import { PanResponder, View } from "react-native";
 import type { LayoutChangeEvent, ViewStyle } from "react-native";
 import { z } from "zod";
-import { Heading, useHost } from "./ui";
+import { CardArea, Heading, useHost } from "./ui";
 
 /** The changes' share of the panel's height. null: as tall as their content, up to a cap. The graph takes the rest. */
 export const sizesSchema = z.object({ changes: z.number().nullable() });
@@ -76,15 +76,18 @@ export function Split({ sizes, onSizes, repositories, changes, graph }: Props) {
   );
 }
 
-/** A section: its title bar, which folds it, and its body. A folded section keeps its actions to itself, as in VS Code. */
+/**
+ * A section: its title bar, which folds it, and its body. A folded section keeps its actions to itself, as in VS Code. The
+ * cards of its rows keep clear of it where they can.
+ */
 function Part({ section, style, onLayout }: { section: Section; style: ViewStyle; onLayout?: (event: LayoutChangeEvent) => void }) {
   return (
-    <View style={style} onLayout={onLayout}>
+    <CardArea style={style} onLayout={onLayout}>
       <Heading title={section.title} folded={section.folded} onFold={section.onFold} count={section.count}>
         {!section.folded && section.actions}
       </Heading>
       {section.body}
-    </View>
+    </CardArea>
   );
 }
 
