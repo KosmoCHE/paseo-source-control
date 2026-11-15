@@ -4,9 +4,9 @@
 import type { PluginHostProps } from "@getpaseo/plugin/client";
 import { Icon } from "@getpaseo/plugin/client/ui";
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
-import type { StyleProp, TextStyle } from "react-native";
+import type { ReactNode, RefObject } from "react";
+import { Platform, Pressable, ScrollView, Text, View } from "react-native";
+import type { LayoutChangeEvent, PressableStateCallbackType, StyleProp, TextStyle, ViewStyle } from "react-native";
 import * as codicon from "./codicons";
 import type { Codicon } from "./codicons";
 
@@ -80,6 +80,16 @@ export function T({ children, size, color, weight, mono, lines, selectable, styl
   );
 }
 
+/**
+ * Colours a list row while the pointer is on it, as VS Code does with `list.hoverBackground` in Dark 2026 and Light 2026:
+ * the host gives plugins no colour for it, and VS Code's see through to whatever the row is on. Use as a Pressable's style.
+ */
+export function useRowHover() {
+  const { c } = useHost();
+  const colour = isDark(c.surface0) ? "#FFFFFF14" : "#00000014";
+  return ({ hovered }: PressableStateCallbackType & { hovered?: boolean }) => (hovered ? { backgroundColor: colour } : null);
+}
+
 /** A wash of colour behind a row: the theme has no translucent tokens. */
 export function Tint({ color, opacity }: { color: string; opacity: number }) {
   return <View style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0, backgroundColor: color, opacity, pointerEvents: "none" }} />;
@@ -104,9 +114,27 @@ interface Floating {
   hint(button: View, text: string): void;
   unhint(): void;
   menu(button: View, items: MenuItem[]): void;
-  card(row: View, content: ReactNode, pinned: boolean): void; // pinned: until something else is pressed
+  card(row: View, area: View | null, content: ReactNode, pinned: boolean): void; // pinned: until something else is pressed
   uncard(): void; // the pointer has left the row: in a moment, unless it is on the card or comes back first
   keep(): void; // the pointer is back on the row
+  carded(): boolean; // whether a card shows
+}
+type Box = Omit<Place, "panel">;
+type Card = { card: ReactNode; pinned: boolean; at: { top: number } | { bottom: number }; room: number };
+
+const ROOM = 160; // the least height a card is put in
+// The corners and shadow of Paseo's own hover cards (workspace-hover-card.tsx), so that a card stands off what it covers.
+const CARD = { borderRadius: 8, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 8 } as const;
+
+/**
+ * Where a card goes. VS Code's hover sits beside the list, clear of its rows; a panel can draw nothing outside itself, so a
+ * card goes above the section its row is in when there is room for it there, and else into the section, on the side away
+ * from the row, so that the pointer can go on down or up the rows.
+ */
+function placeCard(row: Box, area: Box | null, panel: Place["panel"]): Omit<Card, "card" | "pinned"> {
+  if (area && area.y - 8 >= ROOM) return { at: { bottom: panel.height - area.y + 4 }, room: area.y - 8 };
+  const { y, height } = area ?? { y: 0, height: panel.height };
+  return row.y + row.height / 2 < y + height / 2 ? { at: { bottom: panel.height - y - height + 4 }, room: y + height - row.y - row.height - 8 } : { at: { top: y + 4 }, room: row.y - y - 8 };
 }
 const FloatingContext = createContext<Floating | null>(null);
 
@@ -124,10 +152,12 @@ export function PanelRoot({ children }: { children: ReactNode }) {
   const { c, small, row } = useHost();
   const root = useRef<View>(null);
   const [hint, setHint] = useState<(Place & { text: string }) | null>(null);
-  const [shown, show] = useState<(Place & ({ menu: MenuItem[] } | { card: ReactNode; pinned: boolean })) | null>(null);
+  const [shown, show] = useState<(Place & { menu: MenuItem[] }) | Card | null>(null);
   const leaving = useRef<ReturnType<typeof setTimeout>>(undefined);
   // React tells of the pointer coming onto the card before the row hears it leave, so the card remembers it.
   const onCard = useRef(false);
+  const carded = useRef(false);
+  carded.current = shown !== null && "card" in shown;
   useEffect(() => () => clearTimeout(leaving.current), []);
   const floating = useMemo<Floating>(() => {
     const locate = (button: View, then: (place: Place) => void) =>
@@ -138,11 +168,15 @@ export function PanelRoot({ children }: { children: ReactNode }) {
       unhint: () => setHint(null),
       menu: (button, items) => locate(button, (place) => show({ ...place, menu: items })),
       // A card does not take the place of an open menu, and only a pinned card stays when the pointer leaves it.
-      card: (row, content, pinned) =>
+      card: (row, area, content, pinned) =>
         locate(row, (place) => {
-          keep();
-          onCard.current = false;
-          show((shown) => (shown && "menu" in shown ? shown : { ...place, card: content, pinned }));
+          const put = (around: Box | null) => {
+            keep();
+            onCard.current = false;
+            show((shown) => (shown && "menu" in shown ? shown : { card: content, pinned, ...placeCard(place, around, place.panel) }));
+          };
+          if (area) locate(area, put);
+          else put(null);
         }),
       uncard: () => {
         keep();
@@ -150,16 +184,12 @@ export function PanelRoot({ children }: { children: ReactNode }) {
         leaving.current = setTimeout(() => show((shown) => (shown && "card" in shown && !shown.pinned ? null : shown)), 300);
       },
       keep,
+      carded: () => carded.current,
     };
   }, []);
   // Under the button, or over it when there is no room below.
   const upright = (at: Place, needs: number) => (at.y + at.height + needs < at.panel.height ? { top: at.y + at.height + 4 } : { bottom: at.panel.height - at.y + 4 });
   const fromRight = (at: Place) => ({ right: Math.max(4, at.panel.width - at.x - at.width) });
-  // Under a row in the upper half of the panel, over one in the lower half, and as tall as the room on that side.
-  const beside = (at: Place) =>
-    at.y + at.height / 2 < at.panel.height / 2
-      ? { place: { top: at.y + at.height + 2 }, room: at.panel.height - at.y - at.height - 10 }
-      : { place: { bottom: at.panel.height - at.y + 2 }, room: at.y - 10 };
   const box = { position: "absolute", borderWidth: 1, borderColor: c.border } as const;
   const fill = { position: "absolute", top: 0, right: 0, bottom: 0, left: 0 } as const;
   return (
@@ -179,9 +209,9 @@ export function PanelRoot({ children }: { children: ReactNode }) {
                 onCard.current = false;
                 floating.uncard();
               }}
-              style={[box, { left: 8, right: 8, borderRadius: 6, backgroundColor: c.surface1 }, beside(shown).place]}
+              style={[box, CARD, { left: 8, right: 8, backgroundColor: c.surface1 }, shown.at]}
             >
-              <ScrollView style={{ maxHeight: beside(shown).room }} contentContainerStyle={{ padding: 10 }}>
+              <ScrollView style={{ maxHeight: shown.room }} contentContainerStyle={{ padding: 10 }}>
                 {shown.card}
               </ScrollView>
             </View>
@@ -254,16 +284,37 @@ export function useMenu() {
   return useFloating().menu;
 }
 
+const AreaContext = createContext<RefObject<View | null> | null>(null);
+
+/** A part of the panel that the cards of the rows in it keep clear of where they can. */
+export function CardArea({ style, onLayout, children }: { style: ViewStyle; onLayout?: (event: LayoutChangeEvent) => void; children: ReactNode }) {
+  const ref = useRef<View>(null);
+  return (
+    <AreaContext.Provider value={ref}>
+      <View ref={ref} style={style} onLayout={onLayout}>
+        {children}
+      </View>
+    </AreaContext.Provider>
+  );
+}
+
+// VS Code's `workbench.hover.delay`: 1500 milliseconds on a Mac, 500 elsewhere, told as VS Code tells it in a browser.
+const HOVER_DELAY = (Platform.OS === "web" ? navigator.userAgent.includes("Macintosh") : Platform.OS === "ios") ? 1500 : 500;
+// While a card shows, VS Code shows the next row's at once; here the card is not beside its row, and the pointer crosses
+// other rows on its way to it, so a row must hold the pointer this long to take the card over.
+const HOVER_SWITCH = 150;
+
 /**
  * Shows `card()` once the pointer has rested on a row, and keeps it while the pointer moves onto it, as VS Code's hovers
  * do. Where there is no pointer, a long press shows it until something else is pressed. Spread the result into the row.
  */
 export function useHoverCard(card: () => ReactNode) {
   const floating = useFloating();
+  const area = useContext(AreaContext);
   const ref = useRef<View>(null);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
-  const open = (pinned: boolean) => ref.current && floating.card(ref.current, card(), pinned);
+  const open = (pinned: boolean) => ref.current && floating.card(ref.current, area?.current ?? null, card(), pinned);
   const leave = () => {
     clearTimeout(timer.current);
     floating.uncard();
@@ -272,7 +323,7 @@ export function useHoverCard(card: () => ReactNode) {
     ref,
     onHoverIn: () => {
       floating.keep();
-      timer.current = setTimeout(() => open(false), 500);
+      timer.current = setTimeout(() => open(false), floating.carded() ? HOVER_SWITCH : HOVER_DELAY);
     },
     onHoverOut: leave,
     onPressIn: leave,

@@ -10,7 +10,7 @@ import * as codicon from "./codicons";
 import type { Row } from "./sticky";
 import { everyFile, fileName, tree } from "./tree";
 import type { Folder } from "./tree";
-import { Chevron, T, toggle, useHost } from "./ui";
+import { Chevron, T, toggle, useHost, useRowHover } from "./ui";
 
 const STEP = 12; // how far each level is set in
 
@@ -98,9 +98,16 @@ interface FolderProps {
 function FolderRow({ folder, shut, pad, onPress, onChevron, actions }: FolderProps) {
   const { c, small } = useHost();
   const line = useLine();
+  const hover = useRowHover();
   const inside = everyFile(folder);
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel={`Folder ${folder.path}`} accessibilityState={{ expanded: !shut }} onPress={onPress} style={[line, { paddingLeft: pad }]}>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`Folder ${folder.path}`}
+      accessibilityState={{ expanded: !shut }}
+      onPress={onPress}
+      style={(state) => [line, { paddingLeft: pad }, hover(state)]}
+    >
       <Chevron folded={shut} label={`folder ${folder.path}`} onPress={onChevron} />
       <Icon icon={shut ? codicon.folder : codicon.folderOpened} size={small + 5} color={c.foregroundMuted} />
       <T lines={1} style={{ flex: 1, minWidth: 0 }}>
@@ -125,6 +132,7 @@ function FolderRow({ folder, shut, pad, onPress, onChevron, actions }: FolderPro
 function FileRow({ file, pad, onPress, actions }: { file: FileChange; pad: number; onPress: () => void; actions?: Actions }) {
   const { c, small } = useHost();
   const line = useLine();
+  const hover = useRowHover();
   const { letter, color } = mark(file.status, c);
   return (
     <Pressable
@@ -132,7 +140,7 @@ function FileRow({ file, pad, onPress, actions }: { file: FileChange; pad: numbe
       accessibilityLabel={`${file.path}, ${letter}`}
       onPress={onPress}
       // A file lines up with the names of the folders beside it, past their chevrons.
-      style={[line, { paddingLeft: pad + small + 5 + line.gap }]}
+      style={(state) => [line, { paddingLeft: pad + small + 5 + line.gap }, hover(state)]}
     >
       <Icon icon={codicon.file} size={small + 5} color={c.foregroundMuted} />
       <T lines={1} style={[{ flexShrink: 1, minWidth: 0 }, file.status === "D" && { textDecorationLine: "line-through" }]}>
