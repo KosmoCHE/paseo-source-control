@@ -332,17 +332,18 @@ export function useHoverCard(card: () => ReactNode) {
 }
 
 /** `hint` is what hovering shows; it is the label unless the label names a file. */
-export function IconButton({ icon, label, hint, onPress, disabled }: { icon: Codicon; label: string; hint?: string; onPress: () => void; disabled?: boolean }) {
+/** A button with an icon. `toggled`, it is a switch, on while its background shows, as VS Code shows a toggled action. */
+export function IconButton({ icon, label, hint, onPress, disabled, toggled }: { icon: Codicon; label: string; hint?: string; onPress: () => void; disabled?: boolean; toggled?: boolean }) {
   const { c, compact } = useHost();
   return (
     <Pressable
       {...useHint(hint ?? label)}
       accessibilityRole="button"
       accessibilityLabel={label}
-      accessibilityState={{ disabled }}
+      accessibilityState={{ disabled, checked: toggled }}
       hitSlop={4}
       onPress={disabled ? undefined : onPress} // not the disabled prop: that would switch off hovering, and the hint with it
-      style={({ pressed }) => ({ padding: compact ? 6 : 3, borderRadius: 4, opacity: disabled ? 0.4 : pressed ? 0.6 : 1 })}
+      style={({ pressed }) => ({ padding: compact ? 6 : 3, borderRadius: 4, opacity: disabled ? 0.4 : pressed ? 0.6 : 1, backgroundColor: toggled ? c.surface2 : undefined })}
     >
       <Icon icon={icon} size={compact ? 18 : 16} color={c.foregroundMuted} />
     </Pressable>
