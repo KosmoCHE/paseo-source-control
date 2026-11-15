@@ -1,6 +1,9 @@
-// The panel's icons are VS Code's own, so that it reads like VS Code's Source Control view.
-// From https://github.com/microsoft/vscode-codicons, licensed CC BY 4.0; each export carries the
+// The panel's icons are VS Code's own, so that it reads like VS Code's Source Control view; each export carries the
 // codicon's name. Paseo draws inline SVG in the colour it is given.
+//
+// Codicons © Microsoft Corporation, from https://github.com/microsoft/vscode-codicons, licensed under CC BY 4.0:
+// https://creativecommons.org/licenses/by/4.0/. Changed: only each icon's SVG paths are kept, in an inline SVG whose
+// colour Paseo sets. This file is not covered by this repository's MIT License.
 
 export interface Codicon {
   svg: string;

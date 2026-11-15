@@ -1,4 +1,7 @@
 // How long ago a time was, in the words VS Code's fromNow uses with full time words: "3 hours ago".
+//
+// Adapted from fromNow in VS Code 1.142.0's src/vs/base/common/date.ts.
+// Copyright (c) Microsoft Corporation. Licensed under the MIT License: https://github.com/microsoft/vscode/blob/1.142.0/LICENSE.txt
 
 const MINUTE = 60;
 const HOUR = 60 * MINUTE;

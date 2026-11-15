@@ -1,4 +1,8 @@
 // Runs git for the panel. Every handler takes the repository's directory and shells out.
+//
+// `chunks` is adapted from splitInChunks in VS Code 1.142.0's extensions/git/src/util.ts, and `baseOf` and `createdFrom`
+// from getBranchBase and getBranchBaseFromReflog in its extensions/git/src/repository.ts.
+// Copyright (c) Microsoft Corporation. Licensed under the MIT License: https://github.com/microsoft/vscode/blob/1.142.0/LICENSE.txt
 
 import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
