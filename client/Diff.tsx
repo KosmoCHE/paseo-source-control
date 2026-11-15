@@ -143,6 +143,9 @@ function Lines({ found, sideBySide, collapse }: { found: Found; sideBySide: bool
   const unchanged = useMemo(() => (found.kind === "diff" ? regions(found.changes, found.original.length, found.modified.length) : []), [found]);
   // How much of each region shows, by where it is. Turning the switch on folds them all again, as in VS Code.
   const [opened, setOpened] = useState(new Map<string, Shown>());
+  // The diff scrolls on past its last line until only that line is left in view, as VS Code's editors do by default
+  // (editor.scrollBeyondLastLine; viewLayout.ts). A region's bottom edge can then move its bar up however short the diff.
+  const [view, setView] = useState(0);
   useEffect(() => setOpened(new Map()), [collapse]);
   const items: Item[] = useMemo(
     () =>
@@ -251,8 +254,10 @@ function Lines({ found, sideBySide, collapse }: { found: Found; sideBySide: bool
           }}
           onLayout={(event) => {
             measures.view = event.nativeEvent.layout.height;
+            setView(measures.view);
             measures.changed?.();
           }}
+          contentContainerStyle={{ paddingBottom: Math.max(0, view - code.lineHeight) }}
           onContentSizeChange={(_, height) => {
             measures.content = height;
             measures.changed?.();
