@@ -14,14 +14,30 @@ type Host = Pick<PluginHostProps, "theme" | "layout">;
 const HostContext = createContext<Host | null>(null);
 export const HostProvider = HostContext.Provider;
 
-const MONO = { ios: "Menlo", android: "monospace", web: "ui-monospace, Menlo, Consolas, monospace" };
+/**
+ * Paseo's code font before "Code font" is set in its settings, which plugins are not told: on the web its default font
+ * stack. Native apps take one font name, not a list. Code is 16px, chosen for this panel while Paseo's "Code size" is
+ * not told to plugins either; its lines are 1.5 times that, as Paseo's diffs and VS Code's editor on macOS have them.
+ */
+const MONO = { ios: "Menlo", android: "monospace", web: "SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace" };
+const CODE_SIZE = 16;
 
 /** The theme and the sizes that follow from the layout: rows are taller where they are touched. */
 export function useHost() {
   const host = useContext(HostContext);
   if (!host) throw new Error("useHost needs a HostProvider above it");
   const { compact, platform } = host.layout;
-  return { c: host.theme.colors, compact, platform, mono: MONO[platform], text: compact ? 15 : 13, small: compact ? 12 : 11, row: compact ? 34 : 24 };
+  const code = useMemo(() => codeFont(platform), [platform]);
+  return { c: host.theme.colors, compact, platform, mono: MONO[platform], code, text: compact ? 15 : 13, small: compact ? 12 : 11, row: compact ? 34 : 24 };
+}
+
+/**
+ * Code as the diff draws it. Paseo smooths all its text thinner (`-webkit-font-smoothing: antialiased` on its page);
+ * code is drawn as VS Code draws it by default, its `workbench.fontAliasing` left at `default`.
+ */
+function codeFont(platform: Host["layout"]["platform"]) {
+  const smoothing = platform === "web" ? ({ WebkitFontSmoothing: "auto" } as unknown as TextStyle) : {};
+  return { fontFamily: MONO[platform], fontSize: CODE_SIZE, lineHeight: Math.round(CODE_SIZE * 1.5), ...smoothing };
 }
 
 interface TProps {

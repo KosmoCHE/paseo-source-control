@@ -83,12 +83,12 @@ type Item = { file: string; number: number } | InlineRow | PairRow;
 
 /** The lines, scrolled at first to the first change, as VS Code reveals it. */
 function Lines({ found, sideBySide }: { found: Shown; sideBySide: boolean }) {
-  const { small } = useHost();
+  const { code } = useHost();
   const list = useRef<FlatList<Item>>(null);
   const items: Item[] = useMemo(() => (found.kind === "file" ? found.lines.map((line, n) => ({ file: line, number: n + 1 })) : sideBySide ? pairRows(found) : inlineRows(found)), [found, sideBySide]);
   const first = items.findIndex((item) => ("kind" in item ? item.kind !== "same" : "changed" in item && item.changed));
   const lines = found.kind === "file" ? found.lines.length : Math.max(found.original.length, found.modified.length);
-  const digits = (small + 1) * 0.6 * String(lines).length + 12; // a column wide enough for the last line's number
+  const digits = code.fontSize * 0.6 * String(lines).length + 12; // a column wide enough for the last line's number
   // Once, when the diff first shows: it is read again every few seconds, and the reader may have scrolled since.
   useEffect(() => {
     if (first > 0) list.current?.scrollToIndex({ index: Math.max(0, first - 3), animated: false });
@@ -115,15 +115,20 @@ function Lines({ found, sideBySide }: { found: Shown; sideBySide: boolean }) {
   );
 }
 
-/** A line's text, its changed stretches drawn in `colour`. */
+/**
+ * A line's text, its changed stretches drawn in `colour`. VS Code colours a changed stretch the full height of its line
+ * (decorations.css: `.cdr` is `height: 100%`); a stretch of text is coloured only as tall as its font, about 1.17 times
+ * its size for Menlo, so it is padded out to the line.
+ */
 function Marked({ text, marks, colour }: { text: string; marks: Marks; colour: string }) {
-  const { small } = useHost();
+  const { code } = useHost();
+  const fill = (code.lineHeight - code.fontSize * 1.17) / 2;
   const parts: ReactNode[] = [];
   let at = 0;
   for (const [start, end] of marks) {
     if (start > at) parts.push(text.slice(at, start));
     parts.push(
-      <Text key={start} style={{ backgroundColor: colour }}>
+      <Text key={start} style={{ backgroundColor: colour, paddingVertical: fill }}>
         {text.slice(start, end)}
       </Text>,
     );
@@ -131,16 +136,16 @@ function Marked({ text, marks, colour }: { text: string; marks: Marks; colour: s
   }
   if (at < text.length) parts.push(text.slice(at));
   return (
-    <T mono size={small + 1} selectable style={{ flex: 1, minWidth: 0 }}>
+    <T selectable style={[code, { flex: 1, minWidth: 0 }]}>
       {parts.length ? parts : " "}
     </T>
   );
 }
 
 function LineNumber({ value, width }: { value: number | null; width: number }) {
-  const { c, small } = useHost();
+  const { c, code } = useHost();
   return (
-    <T mono size={small + 1} color={c.foregroundMuted} style={{ width, paddingRight: 8, textAlign: "right" }}>
+    <T color={c.foregroundMuted} style={[code, { width, paddingRight: 8, textAlign: "right" }]}>
       {value === null ? "" : String(value)}
     </T>
   );
@@ -148,9 +153,9 @@ function LineNumber({ value, width }: { value: number | null; width: number }) {
 
 /** VS Code's + and − beside a changed line (diffEditor.renderIndicators). */
 function Indicator({ kind }: { kind: "same" | "remove" | "add" }) {
-  const { c, small } = useHost();
+  const { c, code } = useHost();
   return (
-    <T mono size={small + 1} color={c.foregroundMuted} style={{ width: 16 }}>
+    <T color={c.foregroundMuted} style={[code, { width: 16 }]}>
       {kind === "add" ? "+" : kind === "remove" ? "−" : " "}
     </T>
   );

@@ -28,6 +28,10 @@ Settings take VS Code's defaults. The workspace folder's `.vscode/settings.json`
 
 The host's theme comes first: surfaces, text, borders and accents are Paseo's. Where the theme has no colour for something, VS Code's is used: the graph's lanes and its upstream and base branches, and the diff's lines and changed words, in the colours of VS Code's default themes, Dark 2026 and Light 2026.
 
+## Fonts
+
+Text is Paseo's, in its font and smoothed as Paseo smooths it. Code in the diff is drawn as VS Code draws it by default: its lines 1.5 times the size of the font, and smoothed as the system smooths text, fuller than Paseo smooths its own. Paseo does not tell plugins the "Code font" and "Code size" set in its settings, so the diff takes Paseo's default code font, at 16 pixels.
+
 ## What the host allows
 
 - **A panel, and nothing outside it.** The plugin API offers no popover or overlay, only a modal that covers the window. Dialogs are that modal; hints and menus are drawn inside the panel, over its own content.
@@ -45,6 +49,7 @@ The host's theme comes first: surfaces, text, borders and accents are Paseo's. W
 | No action switches or creates branches | Branches are the agents' to manage |
 | The Repositories section always shows | With no status bar, it is the only place the branch and its sync state show |
 | Long lines wrap in the diff | The diff tab is often narrow |
+| The diff's code is 16 pixels, whatever size is set in Paseo or in VS Code | Paseo does not tell plugins its "Code size", and VS Code's settings are never read; 16 is chosen for this panel |
 | Commit waits for a message to be written | VS Code opens an editor for an empty message; the panel has none |
 | Amending a commit already pushed asks first | A pushed commit can then only be pushed by force |
 | Dialogs offer no "Always", "Never" or "Don't Show Again" | Those choices write the user's VS Code settings |
