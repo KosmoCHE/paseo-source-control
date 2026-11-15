@@ -2,6 +2,11 @@
   "id": "source-control",
   "name": "Source Control",
   "description": "Source control and a commit graph beside every workspace",
+  "media": [
+    "docs/media/panel-and-diff.png",
+    "docs/media/graph.png",
+    "docs/media/changes-light.png"
+  ],
   "requirements": {
     "paseo": ">=0.14.0"
   },
