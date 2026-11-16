@@ -1,6 +1,6 @@
 # What the panel does
 
-The panel has three parts: the workspace's repositories, the selected repository's working tree, and its commit graph. Each scrolls on its own under a title bar that stays put, and each folds from its title bar. As in VS Code, the repository list is as tall as its repositories, ten at most (on a phone, a quarter of the panel at most), and the line between the changes and the graph drags to resize them. Resting the pointer on a button says what it does.
+The panel has three parts: the workspace's repositories, the selected repository's working tree, and its commit graph. Each scrolls on its own under a title bar that stays put, and each folds from its title bar. As in VS Code, the repository list is as tall as its repositories, ten at most (on a phone, a quarter of the panel at most), and the changes and the graph start out equally tall, however much each holds; the line between them drags to resize them. Resting the pointer on a button says what it does.
 
 Where it differs from VS Code, and why, is in [design.md](design.md).
 

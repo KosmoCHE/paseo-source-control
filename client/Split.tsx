@@ -1,7 +1,8 @@
 // The panel's three sections, stacked. Each has a title bar that stays put, and under it a body that
 // scrolls on its own. As in VS Code, the repositories are as tall as their list, up to ten rows (on a
-// phone, up to a quarter of the panel), and do not resize; the line between the changes and the graph drags, as the sashes between VS Code's
-// panes do: one grows by what the other gives up. A folded section is as tall as what it still shows.
+// phone, up to a quarter of the panel), and do not resize; the changes and the graph share the rest equally at first,
+// however much each holds, and the line between them drags, as the sashes between VS Code's panes do: one grows by
+// what the other gives up. A folded section is as tall as what it still shows.
 
 import { useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -10,16 +11,19 @@ import type { LayoutChangeEvent, ViewStyle } from "react-native";
 import { z } from "zod";
 import { CardArea, Heading, useHost } from "./ui";
 
-/** The changes' share of the panel's height. null: as tall as their content, up to a cap. The graph takes the rest. */
+/**
+ * The changes' share of the panel's height. null, until the line is dragged: as tall as the graph, as VS Code first lays
+ * them out, by the weights it gives its views (scm.contribution.ts: 40 and 40; viewPaneContainer.ts: computeInitialSizes).
+ * The graph takes the rest.
+ */
 export const sizesSchema = z.object({ changes: z.number().nullable() });
 export type Sizes = z.infer<typeof sizesSchema>;
 
-const CAP = "40%"; // of the panel, for changes as tall as their content
 const REPOSITORIES = 10; // rows of repositories shown before their list scrolls, as VS Code's scm.repositories.visible
 const REPOSITORIES_ON_PHONE = "25%"; // of the panel: VS Code has no phone, and ten of its taller rows would leave the graph one
 const LEAST = 48; // the height a section keeps when its neighbour is dragged over it
 const TITLE: ViewStyle = { flexGrow: 0, flexShrink: 0 }; // a folded section: as tall as what is left of it
-const REST: ViewStyle = { flex: 1, minHeight: 0 }; // the section that takes the room the others leave
+const REST: ViewStyle = { flex: 1, minHeight: 0 }; // a section that shares the room the others leave
 
 export interface Section {
   title: string;
@@ -57,14 +61,8 @@ export function Split({ sizes, onSizes, repositories, changes, graph }: Props) {
     setNow({ changes: (changes + move) / all });
   };
   const end = () => onSizes(latest.current);
-  // The graph takes the room the others leave, or with the graph folded the changes do.
-  const changesStyle: ViewStyle = changes.folded
-    ? TITLE
-    : graph.folded
-      ? REST
-      : now.changes === null
-        ? { flexGrow: 0, maxHeight: CAP }
-        : { flexGrow: 0, flexShrink: 0, height: `${now.changes * 100}%` };
+  // Until the line is dragged the changes and the graph share the room the repositories leave; with the graph folded the changes take it.
+  const changesStyle: ViewStyle = changes.folded ? TITLE : graph.folded || now.changes === null ? REST : { flexGrow: 0, flexShrink: 0, height: `${now.changes * 100}%` };
   return (
     <View style={{ flex: 1 }} onLayout={measure("all")}>
       <Part section={repositories} style={repositories.folded ? TITLE : { flexGrow: 0, flexShrink: 0, maxHeight: compact ? REPOSITORIES_ON_PHONE : row * (1 + REPOSITORIES) }} />
