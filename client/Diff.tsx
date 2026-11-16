@@ -8,7 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { FlatList, PanResponder, Pressable, Text, View } from "react-native";
-import type { CellRendererProps, PressableStateCallbackType, ViewStyle } from "react-native";
+import type { CellRendererProps, PressableStateCallbackType, TextStyle, ViewStyle } from "react-native";
 import { diffRpc } from "../shared/git";
 import type { DiffSource, FileChange, FileDiff } from "../shared/git";
 import * as codicon from "./codicons";
@@ -17,13 +17,15 @@ import type { Cell, InlineRow, Marks, PairRow } from "./diffRows";
 import { useDiffRequest } from "./diffTab";
 import type { DiffRequest } from "./diffTab";
 import { key } from "./git";
-import { changeSpans } from "./overview";
+import { changeSpans, WIDTH } from "./overview";
 import { OverviewRuler } from "./OverviewRuler";
 import type { Measures } from "./OverviewRuler";
 import { fileName } from "./tree";
 import { HostProvider, IconButton, isDark, Notice, PanelRoot, T, useHint, useHost } from "./ui";
 import { dragged, fold, folded, regions, reveal } from "./unchanged";
 import type { Hidden, Region, Revealed, Shown } from "./unchanged";
+import { TAB_SIZE, wrap, wrapColumn } from "./wrap";
+import type { CharWidths } from "./wrap";
 
 export function DiffPanel({ theme, layout, workspaceId, tab }: PluginWorkspacePanelProps) {
   const request = useDiffRequest(workspaceId);
@@ -40,6 +42,9 @@ export function DiffPanel({ theme, layout, workspaceId, tab }: PluginWorkspacePa
     </HostProvider>
   );
 }
+
+/** How tall a folded region's row is drawn. */
+const BAR = 24;
 
 /** VS Code's widths: below this the diff is drawn inline (diffEditor.renderSideBySideInlineBreakpoint). */
 const SIDE_BY_SIDE = 900;
@@ -124,7 +129,8 @@ function useColours() {
 
 type Found = Exclude<FileDiff, { kind: "binary" }>;
 type Row = InlineRow | PairRow;
-type Item = { file: string; number: number } | Row | Revealed<Row> | Hidden;
+type FileRow = { file: string; number: number };
+type Item = FileRow | Row | Revealed<Row> | Hidden;
 
 /** The modified version's line of a row the same in both versions; null for a changed one. */
 const sameLine = (row: Row) => ("kind" in row ? (row.kind === "same" ? row.modified : null) : row.changed ? null : row.right!.number);
@@ -134,18 +140,29 @@ const keyOf = (item: Item) =>
   "file" in item ? `f${item.number}` : "hidden" in item ? `h${item.hidden}` : "kind" in item ? `${item.kind}${item.original}:${item.modified}` : `${item.left?.number}:${item.right?.number}`;
 const regionKey = ({ original, modified, length }: Region) => `${original}:${modified}:${length}`;
 
-/** The lines, scrolled at first to the first change; unchanged ones folded while `collapse` is on; the overview ruler beside them. */
+/** A line's rows: where each row after the first starts, and how far those rows are set in, in pixels. */
+interface Cut {
+  breaks: number[];
+  pad: number;
+}
+
+/** The lines, opened at the first change; unchanged ones folded while `collapse` is on; the overview ruler beside them. */
 function Lines({ found, sideBySide, collapse }: { found: Found; sideBySide: boolean; collapse: boolean }) {
   const { code, compact } = useHost();
   const colours = useColours();
   const list = useRef<FlatList<Item>>(null);
-  const rows: Item[] = useMemo(() => (found.kind === "file" ? found.lines.map((line, n) => ({ file: line, number: n + 1 })) : sideBySide ? pairRows(found) : inlineRows(found)), [found, sideBySide]);
+  const rows: (FileRow | Row)[] = useMemo(
+    () => (found.kind === "file" ? found.lines.map((line, n) => ({ file: line, number: n + 1 })) : sideBySide ? pairRows(found) : inlineRows(found)),
+    [found, sideBySide],
+  );
   const unchanged = useMemo(() => (found.kind === "diff" ? regions(found.changes, found.original.length, found.modified.length) : []), [found]);
   // How much of each region shows, by where it is. Turning the switch on folds them all again, as in VS Code.
   const [opened, setOpened] = useState(new Map<string, Shown>());
-  // The diff scrolls on past its last line until only that line is left in view, as VS Code's editors do by default
-  // (editor.scrollBeyondLastLine; viewLayout.ts). A region's bottom edge can then move its bar up however short the diff.
-  const [view, setView] = useState(0);
+  // The box the list and the ruler share. The diff scrolls on past its last line until only that line is left in view,
+  // as VS Code's editors do by default (editor.scrollBeyondLastLine; viewLayout.ts). A region's bottom edge can then move
+  // its bar up however short the diff.
+  const [frame, setFrame] = useState({ width: 0, height: 0 });
+  const after = Math.max(0, frame.height - code.lineHeight);
   useEffect(() => setOpened(new Map()), [collapse]);
   const items: Item[] = useMemo(
     () =>
@@ -172,52 +189,78 @@ function Lines({ found, sideBySide, collapse }: { found: Found; sideBySide: bool
     });
   };
   const first = items.findIndex((item) => ("kind" in item ? item.kind !== "same" : "changed" in item && item.changed));
+  // Once, when the diff first shows (it is read again every few seconds, and the reader may have scrolled since), it
+  // opens at the first change.
+  const [start] = useState(() => Math.max(0, first - 3));
   const lines = found.kind === "file" ? found.lines.length : Math.max(found.original.length, found.modified.length);
   const digits = code.fontSize * 0.6 * String(lines).length + 12; // a column wide enough for the last line's number
-  // Once, when the diff first shows: it is read again every few seconds, and the reader may have scrolled since.
-  useEffect(() => {
-    if (first > 0) list.current?.scrollToIndex({ index: Math.max(0, first - 3), animated: false });
-  }, []);
-
   // VS Code draws the ruler beside every diff; a phone has no room for it.
   const ruler = found.kind === "diff" && !compact;
-  const measures = useRef<Measures>({ heights: new Map(), view: 0, content: 0, scrolled: 0 }).current;
-  useEffect(() => measures.heights.clear(), [sideBySide]); // rows of the other layout would skew the average
-  const keys = useMemo(() => items.map(keyOf), [items]);
+
+  // Where every line wraps, worked out before any is drawn, as VS Code works it out: every row's height is then known,
+  // so the list opens at the first change at once and the ruler is to scale. Worked out for each line, not again as
+  // regions open and fold; a folded region's row is the one row not among them.
+  const [widths, setWidths] = useState<CharWidths | null>(null);
+  const shapes = useMemo(() => {
+    if (!widths || !frame.width) return null;
+    const width = frame.width - (ruler ? WIDTH : 0);
+    const half = (width - 1) / 2 - digits - 16;
+    const cut = (text: string, room: number): Cut => {
+      const { breaks, indent } = wrap(text, wrapColumn(room, widths), widths);
+      return { breaks, pad: indent * widths.half };
+    };
+    const none = { breaks: [], pad: 0 };
+    return new Map(
+      rows.map((row) => {
+        const cuts =
+          "file" in row
+            ? [cut(row.file, width - digits)]
+            : "kind" in row
+              ? [cut(row.text, width - digits * 2 - 16)]
+              : [row.left ? cut(row.left.text, half) : none, row.right ? cut(row.right.text, half) : none];
+        return [keyOf(row), { cuts, height: code.lineHeight * Math.max(...cuts.map((cut) => cut.breaks.length + 1)) }];
+      }),
+    );
+  }, [rows, widths, frame.width, ruler, digits, code]);
+  const height = (item: Item) => shapes?.get(keyOf(item))?.height ?? BAR;
+  // Where each row starts, and, last, where the last ends: told to the list and to the ruler.
+  const starts = useMemo(() => {
+    const starts = new Float64Array(items.length + 1);
+    items.forEach((item, index) => (starts[index + 1] = starts[index] + height(item)));
+    return starts;
+  }, [items, shapes]);
   const spans = useMemo(() => changeSpans(items, removedRow, addedRow), [items]);
-  const scrollTo = useCallback((offset: number) => list.current?.scrollToOffset({ offset: Math.max(0, Math.min(offset, measures.content - measures.view)), animated: false }), [measures]);
+  const measures = useRef<Measures>({ view: 0, scrolled: 0 }).current;
+  // The list is scrolled to the first change before it is first drawn: on its own it scrolls to its initial row only once
+  // laid out, a frame later. The ruler, drawn with it, is told at once.
+  const ready = shapes !== null;
+  const placed = useRef(false);
+  if (ready && !placed.current) {
+    placed.current = true;
+    measures.scrolled = starts[start];
+  }
+  useLayoutEffect(() => {
+    if (ready) list.current?.scrollToOffset({ offset: starts[start], animated: false });
+  }, [ready]);
+  const scrollTo = useCallback((offset: number) => list.current?.scrollToOffset({ offset: Math.max(0, offset), animated: false }), []);
   const scrollBy = (delta: number) => {
     measures.scrolled += delta; // at once: the next move may come before the scroll is told
     list.current?.scrollToOffset({ offset: measures.scrolled, animated: false });
   };
 
-  // How tall a region's line is drawn, under keyOf's key for a row the same in both versions; undefined until it is.
+  // How tall a region's line is drawn, under keyOf's key for a row the same in both versions.
   const lineKey = (region: Region, line: number) => `${sideBySide ? "" : "same"}${region.original + line}:${region.modified + line}`;
-  const lineHeight = (region: Region) => (line: number) => measures.heights.get(lineKey(region, line)) ?? code.lineHeight;
-  // Lines brought back under a bar scroll the diff by their height once drawn; until then, by one line each.
-  const guessed = useRef(new Map<string, number>()).current;
+  const lineHeight = (region: Region) => (line: number) => shapes?.get(lineKey(region, line))?.height ?? code.lineHeight;
   useLayoutEffect(() => {
     if (!anchor.current) return;
     const { region, below } = anchor.current;
     anchor.current = null;
-    guessed.clear();
     const now = (opened.get(regionKey(region)) ?? folded).bottom;
     let delta = 0;
-    for (let n = Math.min(below, now); n < Math.max(below, now); n++) {
-      const line = region.length - 1 - n;
-      if (!measures.heights.has(lineKey(region, line))) guessed.set(lineKey(region, line), code.lineHeight);
-      delta += lineHeight(region)(line);
-    }
+    for (let n = Math.min(below, now); n < Math.max(below, now); n++) delta += lineHeight(region)(region.length - 1 - n);
     scrollBy(now > below ? delta : -delta);
   }, [opened]);
-  const measure = (item: Item, height: number) => {
-    measures.heights.set(keyOf(item), height);
-    const guess = guessed.get(keyOf(item));
-    if (guess !== undefined && guessed.delete(keyOf(item))) scrollBy(height - guess);
-    measures.changed?.();
-  };
   const draw = (item: Item) => {
-    if ("file" in item) return <FileLine number={item.number} text={item.file} width={digits} />;
     if ("hidden" in item) {
       const region = unchanged[item.hidden];
       const shown = opened.get(regionKey(region)) ?? folded;
@@ -233,47 +276,82 @@ function Lines({ found, sideBySide, collapse }: { found: Found; sideBySide: bool
         />
       );
     }
+    const { cuts } = shapes!.get(keyOf(item))!;
+    if ("file" in item) return <FileLine number={item.number} text={item.file} width={digits} cut={cuts[0]} />;
     const revealed = "region" in item;
     const onFold = revealed && item.first ? () => open(item.region, () => folded) : undefined;
-    return "kind" in item ? <InlineLine row={item} width={digits} revealed={revealed} onFold={onFold} /> : <PairLine row={item} width={digits} revealed={revealed} onFold={onFold} />;
+    return "kind" in item ? (
+      <InlineLine row={item} width={digits} revealed={revealed} onFold={onFold} cut={cuts[0]} />
+    ) : (
+      <PairLine row={item} width={digits} revealed={revealed} onFold={onFold} cuts={cuts} />
+    );
   };
   return (
     <>
       {found.kind === "diff" && found.hitTimeout && <Notice>The diff stopped after five seconds, as VS Code's does: more may be marked as changed than was.</Notice>}
-      <View style={{ flex: 1, flexDirection: "row" }}>
-        <FlatList
-          ref={list}
-          style={{ flex: 1 }}
-          data={items}
-          keyExtractor={keyOf}
-          initialNumToRender={60}
-          // Rows wrap, so their heights are only known once drawn: scroll near, then again once it is drawn.
-          onScrollToIndexFailed={({ index, averageItemLength }) => {
-            list.current?.scrollToOffset({ offset: index * averageItemLength, animated: false });
-            setTimeout(() => list.current?.scrollToIndex({ index, animated: false }), 50);
-          }}
-          onLayout={(event) => {
-            measures.view = event.nativeEvent.layout.height;
-            setView(measures.view);
-            measures.changed?.();
-          }}
-          // A footer, not padding: the list's content is measured without its padding, and the ruler would miss the room.
-          ListFooterComponent={<View style={{ height: Math.max(0, view - code.lineHeight) }} />}
-          onContentSizeChange={(_, height) => {
-            measures.content = height;
-            measures.changed?.();
-          }}
-          scrollEventThrottle={16}
-          onScroll={(event) => {
-            measures.scrolled = event.nativeEvent.contentOffset.y;
-            measures.changed?.();
-          }}
-          CellRendererComponent={Cell}
-          renderItem={({ item }) => <View onLayout={(event) => measure(item, event.nativeEvent.layout.height)}>{draw(item)}</View>}
-        />
-        {ruler && <OverviewRuler keys={keys} spans={spans} measures={measures} colours={colours.ruler} scrollTo={scrollTo} />}
+      <View
+        style={{ flex: 1, flexDirection: "row" }}
+        onLayout={(event) => {
+          const { width, height } = event.nativeEvent.layout;
+          measures.view = height;
+          setFrame({ width, height });
+          measures.changed?.();
+        }}
+      >
+        {!widths && <MeasureCharacters onMeasured={setWidths} />}
+        {shapes && (
+          <FlatList
+            ref={list}
+            style={{ flex: 1 }}
+            data={items}
+            keyExtractor={keyOf}
+            getItemLayout={(_, index) => ({ length: starts[index + 1] - starts[index], offset: starts[index], index })}
+            initialScrollIndex={start}
+            initialNumToRender={Math.ceil(frame.height / code.lineHeight)} // enough to fill the view, however short the rows
+            // Beside the ruler, its slider is the diff's scrollbar, and the text has the list's whole width to wrap in.
+            showsVerticalScrollIndicator={!ruler}
+            // The room past the last line, which the ruler adds to the rows.
+            ListFooterComponent={<View style={{ height: after }} />}
+            scrollEventThrottle={16}
+            onScroll={(event) => {
+              measures.scrolled = event.nativeEvent.contentOffset.y;
+              measures.changed?.();
+            }}
+            CellRendererComponent={Cell}
+            renderItem={({ item, index }) => <View style={{ height: starts[index + 1] - starts[index] }}>{draw(item)}</View>}
+          />
+        )}
+        {shapes && ruler && <OverviewRuler starts={starts} after={after} spans={spans} measures={measures} colours={colours.ruler} scrollTo={scrollTo} />}
       </View>
     </>
+  );
+}
+
+/**
+ * Measures the code font as VS Code measures it (fontMeasurements.ts): how wide it draws 'n', a typical character, and
+ * 'ｍ', a full-width one, from a thousand of each in a row, out of sight.
+ */
+function MeasureCharacters({ onMeasured }: { onMeasured: (widths: CharWidths) => void }) {
+  const { code } = useHost();
+  const read = useRef<Partial<CharWidths>>({}).current;
+  const sample = (character: string, kind: keyof CharWidths) => (
+    <Text
+      style={[code, { alignSelf: "flex-start" }]}
+      onLayout={(event) => {
+        read[kind] = event.nativeEvent.layout.width / 1000;
+        if (read.half && read.full) onMeasured({ half: read.half, full: read.full });
+      }}
+    >
+      {character.repeat(1000)}
+    </Text>
+  );
+  return (
+    <View pointerEvents="none" style={{ position: "absolute", width: 0, height: 0, overflow: "hidden" }}>
+      <View style={{ width: 100000 }}>
+        {sample("n", "half")}
+        {sample("\uff4d", "full")}
+      </View>
+    </View>
   );
 }
 
@@ -313,7 +391,7 @@ function HiddenLines({
       style={
         {
           flex: 1,
-          height: 24,
+          height: BAR,
           flexDirection: "row",
           alignItems: "center",
           backgroundColor: c.surface1,
@@ -445,33 +523,61 @@ function Edge({
 }
 
 /**
- * A line's text, its changed stretches drawn in `colour`. VS Code colours a changed stretch the full height of its line
+ * A line's text in the rows it wraps onto, its changed stretches drawn in `colour`. VS Code colours a changed stretch the full height of its line
  * (decorations.css: `.cdr` is `height: 100%`); a stretch of text is coloured only as tall as its font, about 1.17 times
  * its size for Menlo, so it is padded out to the line. A stretch names the code font again: once an interface font is
  * set, Paseo gives every element outside its own code views that font (apply-root-font.web.ts), and the stretch would
  * take it instead of the line's.
  */
-function Marked({ text, marks, colour }: { text: string; marks: Marks; colour: string }) {
-  const { code } = useHost();
+function Marked({ text, marks, colour, cut }: { text: string; marks: Marks; colour: string; cut: Cut }) {
+  const { code, platform } = useHost();
   const fill = (code.lineHeight - code.fontSize * 1.17) / 2;
-  const parts: ReactNode[] = [];
-  let at = 0;
-  for (const [start, end] of marks) {
-    if (start > at) parts.push(text.slice(at, start));
-    parts.push(
-      <Text key={start} style={{ fontFamily: code.fontFamily, backgroundColor: colour, paddingVertical: fill }}>
-        {text.slice(start, end)}
-      </Text>,
+  const marked = (from: number, to: number) => {
+    const parts: ReactNode[] = [];
+    let at = from;
+    for (const [start, end] of marks) {
+      const [left, right] = [Math.max(start, from), Math.min(end, to)];
+      if (left >= right) continue;
+      if (left > at) parts.push(text.slice(at, left));
+      parts.push(
+        <Text key={left} style={{ fontFamily: code.fontFamily, backgroundColor: colour, paddingVertical: fill }}>
+          {text.slice(left, right)}
+        </Text>,
+      );
+      at = right;
+    }
+    if (at < to) parts.push(text.slice(at, to));
+    return parts.length ? parts : " ";
+  };
+  const rows = [0, ...cut.breaks].map((from, n) => [from, cut.breaks[n] ?? text.length]);
+  // On the web the rows are boxes in one text, each as wide as it: the line breaks between them only, and is selected
+  // and copied whole, as a wrapped line is in VS Code. Off the web each row is a text of its own.
+  if (platform === "web")
+    return (
+      <T selectable style={[code, { flex: 1, minWidth: 0, overflow: "hidden" }]}>
+        {rows.map(([from, to], n) => (
+          <Text key={from} style={[WEB_ROW, { fontFamily: code.fontFamily }, n > 0 && { paddingLeft: cut.pad }]}>
+            {marked(from, to)}
+          </Text>
+        ))}
+      </T>
     );
-    at = end;
-  }
-  if (at < text.length) parts.push(text.slice(at));
   return (
-    <T selectable style={[code, { flex: 1, minWidth: 0 }]}>
-      {parts.length ? parts : " "}
-    </T>
+    <View style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
+      {rows.map(([from, to], n) => (
+        <T key={from} selectable lines={1} style={[code, n > 0 && { paddingLeft: cut.pad }]}>
+          {marked(from, to)}
+        </T>
+      ))}
+    </View>
   );
 }
+
+/**
+ * A row of a wrapped line on the web, its tabs as wide as VS Code's (editor.tabSize). It names the code font, as a
+ * changed stretch does, and sits at the top of its line, so that the line is as tall as one row.
+ */
+const WEB_ROW = { display: "inline-block", width: "100%", whiteSpace: "pre", verticalAlign: "top", tabSize: TAB_SIZE } as object as TextStyle;
 
 function LineNumber({ value, width }: { value: number | null; width: number }) {
   const { c, code } = useHost();
@@ -503,11 +609,11 @@ function Indicator({ kind, onFold }: { kind: "same" | "remove" | "add"; onFold?:
   );
 }
 
-function FileLine({ number, text, width }: { number: number; text: string; width: number }) {
+function FileLine({ number, text, width, cut }: { number: number; text: string; width: number; cut: Cut }) {
   return (
     <View style={{ flexDirection: "row" }}>
       <LineNumber value={number} width={width} />
-      <Marked text={text} marks={[]} colour="" />
+      <Marked text={text} marks={[]} colour="" cut={cut} />
     </View>
   );
 }
@@ -519,7 +625,7 @@ interface LineProps {
 }
 
 /** A line of the inline view, numbered in the original and in the modified version, as VS Code numbers them. */
-function InlineLine({ row, width, revealed, onFold }: LineProps & { row: InlineRow }) {
+function InlineLine({ row, width, revealed, onFold, cut }: LineProps & { row: InlineRow; cut: Cut }) {
   const colours = useColours();
   const removed = row.kind === "remove";
   return (
@@ -527,7 +633,7 @@ function InlineLine({ row, width, revealed, onFold }: LineProps & { row: InlineR
       <LineNumber value={row.original} width={width} />
       <LineNumber value={row.modified} width={width} />
       <Indicator kind={row.kind} onFold={onFold} />
-      <Marked text={row.text} marks={row.marks} colour={removed ? colours.removedText : colours.insertedText} />
+      <Marked text={row.text} marks={row.marks} colour={removed ? colours.removedText : colours.insertedText} cut={cut} />
     </View>
   );
 }
@@ -536,16 +642,16 @@ function InlineLine({ row, width, revealed, onFold }: LineProps & { row: InlineR
  * A row of the side-by-side view: the original on the left, the modified on the right. In a change, a side with no
  * line, or with a line that wraps onto fewer rows than the other's, is filled out below it.
  */
-function PairLine({ row, width, revealed, onFold }: LineProps & { row: PairRow }) {
+function PairLine({ row, width, revealed, onFold, cuts }: LineProps & { row: PairRow; cuts: Cut[] }) {
   const { c } = useHost();
   const colours = useColours();
-  const half = (cell: Cell | null, kind: "remove" | "add") => (
+  const half = (cell: Cell | null, kind: "remove" | "add", cut: Cut) => (
     <View style={{ flex: 1 }}>
       {cell && (
         <View style={{ flexDirection: "row", backgroundColor: row.changed ? (kind === "add" ? colours.insertedLine : colours.removedLine) : revealed ? colours.unchanged : undefined }}>
           <LineNumber value={cell.number} width={width} />
           <Indicator kind={row.changed ? kind : "same"} onFold={onFold} />
-          <Marked text={cell.text} marks={cell.marks} colour={kind === "add" ? colours.insertedText : colours.removedText} />
+          <Marked text={cell.text} marks={cell.marks} colour={kind === "add" ? colours.insertedText : colours.removedText} cut={cut} />
         </View>
       )}
       {row.changed && <Filler gutter={width + 16} />}
@@ -553,9 +659,9 @@ function PairLine({ row, width, revealed, onFold }: LineProps & { row: PairRow }
   );
   return (
     <View style={{ flexDirection: "row" }}>
-      {half(row.left, "remove")}
+      {half(row.left, "remove", cuts[0])}
       <View style={{ width: 1, backgroundColor: c.border }} />
-      {half(row.right, "add")}
+      {half(row.right, "add", cuts[1])}
     </View>
   );
 }

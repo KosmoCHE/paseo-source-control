@@ -45,10 +45,11 @@ client/codicons.ts the icons taken from VS Code
 client/Diff.tsx    the diff tab
 client/diffRows.ts lays a diff out in rows, inline or side by side
 client/unchanged.ts folds the unchanged lines of a diff
+client/wrap.ts     wraps a diff's long lines as VS Code's editor wraps them
 client/overview.ts where the overview ruler's marks and slider go
 client/OverviewRuler.tsx draws the ruler
 client/Panel.tsx   puts the panel together
-test/              node:test suites for the git reader, the repository search, the lanes, the rows of changes to pull and push, the times, the file tree, the rows kept at the top, the rows of a diff, its folded lines and its overview ruler
+test/              node:test suites for the git reader, the repository search, the lanes, the rows of changes to pull and push, the times, the file tree, the rows kept at the top, the rows of a diff, its folded lines, its wrapped lines and its overview ruler
 preview/           the panel in a browser, for development
 ```
 
