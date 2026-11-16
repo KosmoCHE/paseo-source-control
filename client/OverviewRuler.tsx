@@ -6,11 +6,9 @@ import { PanResponder, Platform, View } from "react-native";
 import { slider, WIDTH, zone } from "./overview";
 import type { Span } from "./overview";
 
-/** What the list tells the ruler as it is drawn and scrolled. Rows are measured as they are drawn. */
+/** What the list tells the ruler as it is laid out and scrolled. */
 export interface Measures {
-  heights: Map<string, number>; // by row key
   view: number;
-  content: number;
   scrolled: number;
   changed?: () => void; // the ruler's, to draw itself again
 }
@@ -33,14 +31,15 @@ interface WheelTarget {
 }
 
 interface Props {
-  keys: string[]; // the rows' keys, in order
+  starts: Float64Array; // where each row starts, and, last, where the last ends
+  after: number; // the room the list leaves after its last row
   spans: { removed: Span[]; added: Span[] };
   measures: Measures;
   colours: RulerColours;
   scrollTo: (offset: number) => void;
 }
 
-export function OverviewRuler({ keys, spans, measures, colours, scrollTo }: Props) {
+export function OverviewRuler({ starts, after, spans, measures, colours, scrollTo }: Props) {
   const [, redraw] = useReducer((n: number) => n + 1, 0);
   useEffect(() => {
     let frame: number | null = null;
@@ -52,15 +51,9 @@ export function OverviewRuler({ keys, spans, measures, colours, scrollTo }: Prop
       if (frame !== null) cancelAnimationFrame(frame);
     };
   }, [measures]);
-  const { view, content, scrolled, heights } = measures;
+  const { view, scrolled } = measures;
+  const content = starts[starts.length - 1] + after;
   const state = slider(view, content, scrolled);
-
-  // Where each row starts: as drawn, or, for rows not drawn yet, the average of those that were.
-  let total = 0;
-  for (const height of heights.values()) total += height;
-  const average = heights.size ? total / heights.size : 0;
-  const starts = new Float64Array(keys.length + 1);
-  keys.forEach((key, index) => (starts[index + 1] = starts[index] + (heights.get(key) ?? average)));
 
   const [hovered, setHovered] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -102,7 +95,7 @@ export function OverviewRuler({ keys, spans, measures, colours, scrollTo }: Prop
   }, [scrollTo]);
 
   const marks = (list: Span[], colour: string, left: number) =>
-    content > 0 &&
+    view > 0 &&
     list.map(([from, to]) => {
       const { top, height } = zone(starts[from], starts[to], Math.max(content, view), view); // a diff shorter than the view is not stretched over it
       return <View key={from} pointerEvents="none" style={{ position: "absolute", left, width: WIDTH / 2, top, height, backgroundColor: colour }} />;
