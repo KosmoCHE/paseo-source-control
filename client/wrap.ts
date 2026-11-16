@@ -56,12 +56,34 @@ export function wrapColumn(width: number, widths: CharWidths) {
   return Math.max(1, Math.floor((width - 2) / widths.half));
 }
 
+/** How many columns a character takes at column `at`: a tab reaches to the next tab stop from the line's start (computeCharWidth). */
+function columnsOf(code: number, at: number, fullColumns: number) {
+  return code === TAB ? TAB_SIZE - (at % TAB_SIZE) : fullWidth(code) || code < 32 ? fullColumns : 1;
+}
+
+/** How many columns each tab of `text` takes, by where it is; VS Code draws a wrapped row's tabs so too (startVisibleColumn). */
+export function tabColumns(text: string, widths: CharWidths) {
+  const fullColumns = widths.full / widths.half;
+  const tabs = new Map<number, number>();
+  let at = 0;
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (isHighSurrogate(code)) {
+      [at, i] = [at + 2, i + 1];
+      continue;
+    }
+    if (code === TAB) tabs.set(i, columnsOf(code, at, fullColumns));
+    at += columnsOf(code, at, fullColumns);
+  }
+  return tabs;
+}
+
 /** Where `text` wraps at `column` columns. */
 export function wrap(text: string, column: number, widths: CharWidths): Wrapped {
   const length = text.length;
   if (length <= 1) return unwrapped;
   const fullColumns = widths.full / widths.half;
-  const columns = (code: number, at: number) => (code === TAB ? TAB_SIZE - (at % TAB_SIZE) : fullWidth(code) || code < 32 ? fullColumns : 1);
+  const columns = (code: number, at: number) => columnsOf(code, at, fullColumns);
   const pixels = (code: number, at: number) => (code === TAB ? (TAB_SIZE - (at % TAB_SIZE)) * widths.half : fullWidth(code) || code < 32 ? widths.full : widths.half);
 
   // The rows after the first are set in as far as the line is, unless no character would fit after (computeWrappedTextIndentLength).

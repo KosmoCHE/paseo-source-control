@@ -57,7 +57,7 @@ Text is Paseo's, in its font and smoothed as Paseo smooths it. Code in the diff 
 | A region opened by hand folds again once a change above it or in it moves it | VS Code carries what is open through each edit; the panel knows a region by where it is |
 | Phones have no overview ruler | A phone's diff is narrow, and a finger scrolls it |
 | Beside the overview ruler the diff has no scrollbar of its own: the ruler's slider is its scrollbar | Lines are wrapped before they are drawn, and a scrollbar would take a width that is not known until it is drawn |
-| Off the web, each row of a wrapped line is selected on its own | React Native draws the rows of a line as boxes in one text on the web only |
+| Off the web, each row of a wrapped line is selected on its own, and a tab is drawn and copied as spaces | React Native draws the rows of a line as boxes in one text, and gives a tab the width the line was wrapped with, on the web only |
 | Off the web, the side of a change with less to show is filled out flat, without VS Code's diagonal stripes | React Native has no repeating background to draw them with |
 | Commit waits for a message to be written | VS Code opens an editor for an empty message; the panel has none |
 | Amending a commit already pushed asks first | A pushed commit can then only be pushed by force |

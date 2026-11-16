@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { wrap } from "../client/wrap.ts";
+import { tabColumns, wrap } from "../client/wrap.ts";
 
 // VS Code's own cases, from monospaceLineBreaksComputer.test.ts in 1.142.0: `|` marks where a row starts. As there, a
 // character is 7 pixels wide and a full-width one 14, and tabs are four columns.
@@ -37,4 +37,11 @@ test("the rows after the first are set in as far as the line is", () => {
   assert.equal(wrap("\t\tx".padEnd(40, "y"), 20, widths).indent, 8);
   // Indented so far that a full-width character would not fit after: not set in at all.
   assert.equal(wrap(" ".repeat(19) + "x".repeat(10), 20, widths).indent, 0);
+});
+
+test("a tab reaches to the next tab stop from the start of the line, wherever its row starts", () => {
+  assert.deepEqual([...tabColumns("a\tbc\td", widths)], [[1, 3], [4, 2]]);
+  // A Chinese character takes two columns here, a surrogate pair two.
+  assert.deepEqual([...tabColumns("中\tx", widths)], [[1, 2]]);
+  assert.deepEqual([...tabColumns("🐇x\t", widths)], [[3, 1]]);
 });

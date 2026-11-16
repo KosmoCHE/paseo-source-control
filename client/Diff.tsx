@@ -24,7 +24,7 @@ import { fileName } from "./tree";
 import { HostProvider, IconButton, isDark, Notice, PanelRoot, T, useHint, useHost } from "./ui";
 import { dragged, fold, folded, regions, reveal } from "./unchanged";
 import type { Hidden, Region, Revealed, Shown } from "./unchanged";
-import { TAB_SIZE, wrap, wrapColumn } from "./wrap";
+import { tabColumns, wrap, wrapColumn } from "./wrap";
 import type { CharWidths } from "./wrap";
 
 export function DiffPanel({ theme, layout, workspaceId, tab }: PluginWorkspacePanelProps) {
@@ -140,11 +140,27 @@ const keyOf = (item: Item) =>
   "file" in item ? `f${item.number}` : "hidden" in item ? `h${item.hidden}` : "kind" in item ? `${item.kind}${item.original}:${item.modified}` : `${item.left?.number}:${item.right?.number}`;
 const regionKey = ({ original, modified, length }: Region) => `${original}:${modified}:${length}`;
 
-/** A line's rows: where each row after the first starts, and how far those rows are set in, in pixels. */
+/**
+ * The code font as it is drawn: how wide its characters are, and how tall a row of it is. Both are measured: off the
+ * web the system's text size scales them (allowFontScaling).
+ */
+interface Font {
+  widths: CharWidths;
+  row: number;
+}
+
+/**
+ * A line as it is drawn: where each row after the first starts, how many columns those rows are set in, how many
+ * columns each tab takes by where it is, and how wide a column is.
+ */
 interface Cut {
   breaks: number[];
-  pad: number;
+  indent: number;
+  tabs: Map<number, number>;
+  column: number;
 }
+
+const noTabs = new Map<number, number>();
 
 /** The lines, opened at the first change; unchanged ones folded while `collapse` is on; the overview ruler beside them. */
 function Lines({ found, sideBySide, collapse }: { found: Found; sideBySide: boolean; collapse: boolean }) {
@@ -162,7 +178,10 @@ function Lines({ found, sideBySide, collapse }: { found: Found; sideBySide: bool
   // as VS Code's editors do by default (editor.scrollBeyondLastLine; viewLayout.ts). A region's bottom edge can then move
   // its bar up however short the diff.
   const [frame, setFrame] = useState({ width: 0, height: 0 });
-  const after = Math.max(0, frame.height - code.lineHeight);
+  const [font, setFont] = useState<Font | null>(null);
+  const unmeasured = font !== null && !(font.row > 0 && font.widths.half > 0 && font.widths.full > 0); // said, not drawn as nothing
+  const rowHeight = font?.row ?? 0; // known before anything below is drawn
+  const after = Math.max(0, frame.height - rowHeight);
   useEffect(() => setOpened(new Map()), [collapse]);
   const items: Item[] = useMemo(
     () =>
@@ -200,16 +219,17 @@ function Lines({ found, sideBySide, collapse }: { found: Found; sideBySide: bool
   // Where every line wraps, worked out before any is drawn, as VS Code works it out: every row's height is then known,
   // so the list opens at the first change at once and the ruler is to scale. Worked out for each line, not again as
   // regions open and fold; a folded region's row is the one row not among them.
-  const [widths, setWidths] = useState<CharWidths | null>(null);
   const shapes = useMemo(() => {
-    if (!widths || !frame.width) return null;
+    if (!font || unmeasured || !frame.width) return null;
+    const { widths } = font;
     const width = frame.width - (ruler ? WIDTH : 0);
     const half = (width - 1) / 2 - digits - 16;
-    const cut = (text: string, room: number): Cut => {
-      const { breaks, indent } = wrap(text, wrapColumn(room, widths), widths);
-      return { breaks, pad: indent * widths.half };
-    };
-    const none = { breaks: [], pad: 0 };
+    const cut = (text: string, room: number): Cut => ({
+      ...wrap(text, wrapColumn(room, widths), widths),
+      tabs: text.includes("\t") ? tabColumns(text, widths) : noTabs,
+      column: widths.half,
+    });
+    const none = { breaks: [], indent: 0, tabs: noTabs, column: widths.half };
     return new Map(
       rows.map((row) => {
         const cuts =
@@ -218,10 +238,10 @@ function Lines({ found, sideBySide, collapse }: { found: Found; sideBySide: bool
             : "kind" in row
               ? [cut(row.text, width - digits * 2 - 16)]
               : [row.left ? cut(row.left.text, half) : none, row.right ? cut(row.right.text, half) : none];
-        return [keyOf(row), { cuts, height: code.lineHeight * Math.max(...cuts.map((cut) => cut.breaks.length + 1)) }];
+        return [keyOf(row), { cuts, height: font.row * Math.max(...cuts.map((cut) => cut.breaks.length + 1)) }];
       }),
     );
-  }, [rows, widths, frame.width, ruler, digits, code]);
+  }, [rows, font, frame.width, ruler, digits]);
   const height = (item: Item) => shapes?.get(keyOf(item))?.height ?? BAR;
   // Where each row starts, and, last, where the last ends: told to the list and to the ruler.
   const starts = useMemo(() => {
@@ -250,7 +270,7 @@ function Lines({ found, sideBySide, collapse }: { found: Found; sideBySide: bool
 
   // How tall a region's line is drawn, under keyOf's key for a row the same in both versions.
   const lineKey = (region: Region, line: number) => `${sideBySide ? "" : "same"}${region.original + line}:${region.modified + line}`;
-  const lineHeight = (region: Region) => (line: number) => shapes?.get(lineKey(region, line))?.height ?? code.lineHeight;
+  const lineHeight = (region: Region) => (line: number) => shapes!.get(lineKey(region, line))!.height;
   useLayoutEffect(() => {
     if (!anchor.current) return;
     const { region, below } = anchor.current;
@@ -288,6 +308,7 @@ function Lines({ found, sideBySide, collapse }: { found: Found; sideBySide: bool
   };
   return (
     <>
+      {unmeasured && <Notice failed>{`The code font could not be measured: ${JSON.stringify(font)}`}</Notice>}
       {found.kind === "diff" && found.hitTimeout && <Notice>The diff stopped after five seconds, as VS Code's does: more may be marked as changed than was.</Notice>}
       <View
         style={{ flex: 1, flexDirection: "row" }}
@@ -298,7 +319,7 @@ function Lines({ found, sideBySide, collapse }: { found: Found; sideBySide: bool
           measures.changed?.();
         }}
       >
-        {!widths && <MeasureCharacters onMeasured={setWidths} />}
+        {!font && <MeasureFont onMeasured={setFont} />}
         {shapes && (
           <FlatList
             ref={list}
@@ -307,7 +328,7 @@ function Lines({ found, sideBySide, collapse }: { found: Found; sideBySide: bool
             keyExtractor={keyOf}
             getItemLayout={(_, index) => ({ length: starts[index + 1] - starts[index], offset: starts[index], index })}
             initialScrollIndex={start}
-            initialNumToRender={Math.ceil(frame.height / code.lineHeight)} // enough to fill the view, however short the rows
+            initialNumToRender={Math.ceil(frame.height / rowHeight)} // enough to fill the view, however short the rows
             // Beside the ruler, its slider is the diff's scrollbar, and the text has the list's whole width to wrap in.
             showsVerticalScrollIndicator={!ruler}
             // The room past the last line, which the ruler adds to the rows.
@@ -328,18 +349,20 @@ function Lines({ found, sideBySide, collapse }: { found: Found; sideBySide: bool
 }
 
 /**
- * Measures the code font as VS Code measures it (fontMeasurements.ts): how wide it draws 'n', a typical character, and
- * 'ｍ', a full-width one, from a thousand of each in a row, out of sight.
+ * Measures the code font, out of sight. How wide it draws its characters, as VS Code measures them (fontMeasurements.ts):
+ * 'n', a typical character, and 'ｍ', a full-width one, from a thousand of each in a row; and how tall the row is.
  */
-function MeasureCharacters({ onMeasured }: { onMeasured: (widths: CharWidths) => void }) {
+function MeasureFont({ onMeasured }: { onMeasured: (font: Font) => void }) {
   const { code } = useHost();
-  const read = useRef<Partial<CharWidths>>({}).current;
+  const read = useRef<Partial<CharWidths> & { row?: number }>({}).current;
   const sample = (character: string, kind: keyof CharWidths) => (
     <Text
       style={[code, { alignSelf: "flex-start" }]}
       onLayout={(event) => {
-        read[kind] = event.nativeEvent.layout.width / 1000;
-        if (read.half && read.full) onMeasured({ half: read.half, full: read.full });
+        const { width, height } = event.nativeEvent.layout;
+        read[kind] = width / 1000;
+        read.row = Math.max(read.row ?? 0, height);
+        if (read.half && read.full) onMeasured({ widths: { half: read.half, full: read.full }, row: read.row });
       }}
     >
       {character.repeat(1000)}
@@ -347,7 +370,8 @@ function MeasureCharacters({ onMeasured }: { onMeasured: (widths: CharWidths) =>
   );
   return (
     <View pointerEvents="none" style={{ position: "absolute", width: 0, height: 0, overflow: "hidden" }}>
-      <View style={{ width: 100000 }}>
+      {/* Sized itself: off the web, a box sized by the empty one around it gives its texts no height. */}
+      <View style={{ width: 100000, height: 1000 }}>
         {sample("n", "half")}
         {sample("\uff4d", "full")}
       </View>
@@ -523,40 +547,64 @@ function Edge({
 }
 
 /**
- * A line's text in the rows it wraps onto, its changed stretches drawn in `colour`. VS Code colours a changed stretch the full height of its line
- * (decorations.css: `.cdr` is `height: 100%`); a stretch of text is coloured only as tall as its font, about 1.17 times
- * its size for Menlo, so it is padded out to the line. A stretch names the code font again: once an interface font is
+ * A line's text in the rows it wraps onto, its changed stretches drawn in `colour`. VS Code colours a changed stretch
+ * the full height of its line (decorations.css: `.cdr` is `height: 100%`); a stretch of text is coloured only as tall
+ * as its font, about 1.17 times its size for Menlo, so it is padded out to the line. A stretch names the code font again: once an interface font is
  * set, Paseo gives every element outside its own code views that font (apply-root-font.web.ts), and the stretch would
  * take it instead of the line's.
  */
 function Marked({ text, marks, colour, cut }: { text: string; marks: Marks; colour: string; cut: Cut }) {
   const { code, platform } = useHost();
+  const web = platform === "web";
   const fill = (code.lineHeight - code.fontSize * 1.17) / 2;
+  // A tab is drawn as wide as the line was wrapped with it: to the next tab stop from the start of the line, not of its
+  // row. On the web it stays a tab, in a box that wide, so that it is copied as one; off the web it is spaces.
+  const tabbed = (from: number, to: number) => {
+    const parts: ReactNode[] = [];
+    let at = from;
+    for (let tab = text.indexOf("\t", from); tab !== -1 && tab < to; tab = text.indexOf("\t", tab + 1)) {
+      if (tab > at) parts.push(text.slice(at, tab));
+      const columns = cut.tabs.get(tab)!;
+      parts.push(
+        web ? (
+          <Text key={`tab${tab}`} style={[WEB_TAB, { width: columns * cut.column }]}>
+            {"\t"}
+          </Text>
+        ) : (
+          " ".repeat(Math.round(columns))
+        ),
+      );
+      at = tab + 1;
+    }
+    if (at < to) parts.push(text.slice(at, to));
+    return parts;
+  };
   const marked = (from: number, to: number) => {
     const parts: ReactNode[] = [];
     let at = from;
     for (const [start, end] of marks) {
       const [left, right] = [Math.max(start, from), Math.min(end, to)];
       if (left >= right) continue;
-      if (left > at) parts.push(text.slice(at, left));
+      if (left > at) parts.push(...tabbed(at, left));
       parts.push(
         <Text key={left} style={{ fontFamily: code.fontFamily, backgroundColor: colour, paddingVertical: fill }}>
-          {text.slice(left, right)}
+          {tabbed(left, right)}
         </Text>,
       );
       at = right;
     }
-    if (at < to) parts.push(text.slice(at, to));
+    if (at < to) parts.push(...tabbed(at, to));
     return parts.length ? parts : " ";
   };
   const rows = [0, ...cut.breaks].map((from, n) => [from, cut.breaks[n] ?? text.length]);
+  const pad = cut.indent * cut.column;
   // On the web the rows are boxes in one text, each as wide as it: the line breaks between them only, and is selected
   // and copied whole, as a wrapped line is in VS Code. Off the web each row is a text of its own.
-  if (platform === "web")
+  if (web)
     return (
       <T selectable style={[code, { flex: 1, minWidth: 0, overflow: "hidden" }]}>
         {rows.map(([from, to], n) => (
-          <Text key={from} style={[WEB_ROW, { fontFamily: code.fontFamily }, n > 0 && { paddingLeft: cut.pad }]}>
+          <Text key={from} style={[WEB_ROW, { fontFamily: code.fontFamily }, n > 0 && { paddingLeft: pad }]}>
             {marked(from, to)}
           </Text>
         ))}
@@ -565,7 +613,7 @@ function Marked({ text, marks, colour, cut }: { text: string; marks: Marks; colo
   return (
     <View style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
       {rows.map(([from, to], n) => (
-        <T key={from} selectable lines={1} style={[code, n > 0 && { paddingLeft: cut.pad }]}>
+        <T key={from} selectable lines={1} style={[code, n > 0 && { paddingLeft: pad }]}>
           {marked(from, to)}
         </T>
       ))}
@@ -574,10 +622,12 @@ function Marked({ text, marks, colour, cut }: { text: string; marks: Marks; colo
 }
 
 /**
- * A row of a wrapped line on the web, its tabs as wide as VS Code's (editor.tabSize). It names the code font, as a
- * changed stretch does, and sits at the top of its line, so that the line is as tall as one row.
+ * A row of a wrapped line on the web. It names the code font, as a changed stretch does, and sits at the top of its
+ * line, so that the line is as tall as one row.
  */
-const WEB_ROW = { display: "inline-block", width: "100%", whiteSpace: "pre", verticalAlign: "top", tabSize: TAB_SIZE } as object as TextStyle;
+const WEB_ROW = { display: "inline-block", width: "100%", whiteSpace: "pre", verticalAlign: "top" } as object as TextStyle;
+/** A tab on the web, in a box as wide as it is drawn. */
+const WEB_TAB = { display: "inline-block", overflow: "hidden", verticalAlign: "top" } as object as TextStyle;
 
 function LineNumber({ value, width }: { value: number | null; width: number }) {
   const { c, code } = useHost();
