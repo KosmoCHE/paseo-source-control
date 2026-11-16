@@ -62,7 +62,10 @@ function Diff({ request, collapse, onCollapse }: { request: DiffRequest; collaps
   });
   const [width, setWidth] = useState(0);
   return (
-    <View style={{ flex: 1 }} onLayout={(event) => setWidth(event.nativeEvent.layout.width)}>
+    // Paseo hides a tab in the background (display: none), and it measures nothing then. The diff keeps the size it had,
+    // and so its lines and its place in them, as VS Code's diff editor is back where it was when its tab is shown again
+    // (textDiffEditor.ts: restoreTextDiffEditorViewState).
+    <View style={{ flex: 1 }} onLayout={(event) => event.nativeEvent.layout.width && setWidth(event.nativeEvent.layout.width)}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, paddingVertical: 8, borderBottomWidth: 1, borderColor: c.border }}>
         <T weight="600" lines={1} style={{ flexShrink: 1, minWidth: 0 }}>
           {`${fileName(file)} (${compared(source, file)})`}
@@ -326,6 +329,7 @@ function Lines({ found, sideBySide, collapse }: { found: Found; sideBySide: bool
         style={{ flex: 1, flexDirection: "row" }}
         onLayout={(event) => {
           const { width, height } = event.nativeEvent.layout;
+          if (!width) return; // hidden with its tab (see Diff)
           measures.view = height;
           setFrame({ width, height });
           measures.changed?.();
