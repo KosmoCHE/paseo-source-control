@@ -174,6 +174,15 @@ function Lines({ found, sideBySide, collapse }: { found: Found; sideBySide: bool
   const unchanged = useMemo(() => (found.kind === "diff" ? regions(found.changes, found.original.length, found.modified.length) : []), [found]);
   // How much of each region shows, by where it is. Turning the switch on folds them all again, as in VS Code.
   const [opened, setOpened] = useState(new Map<string, Shown>());
+  // On the web, in the side-by-side view, the side a selection was last started on (see PairLine). A press on the other
+  // side first clears the selection: in the page it also holds the rows of this side between its ends, and a press on
+  // one of them would drag the selection instead of starting a new one.
+  const [side, setSide] = useState<Side | null>(null);
+  const startOn = (next: Side) => {
+    if (next === side) return;
+    (globalThis as unknown as { getSelection(): { removeAllRanges(): void } }).getSelection().removeAllRanges(); // the client is typed without the DOM
+    setSide(next);
+  };
   // The box the list and the ruler share. The diff scrolls on past its last line until only that line is left in view,
   // as VS Code's editors do by default (editor.scrollBeyondLastLine; viewLayout.ts). A region's bottom edge can then move
   // its bar up however short the diff.
@@ -303,7 +312,7 @@ function Lines({ found, sideBySide, collapse }: { found: Found; sideBySide: bool
     return "kind" in item ? (
       <InlineLine row={item} width={digits} revealed={revealed} onFold={onFold} cut={cuts[0]} />
     ) : (
-      <PairLine row={item} width={digits} revealed={revealed} onFold={onFold} cuts={cuts} />
+      <PairLine row={item} width={digits} revealed={revealed} onFold={onFold} cuts={cuts} side={side} onSide={startOn} />
     );
   };
   return (
@@ -553,7 +562,7 @@ function Edge({
  * set, Paseo gives every element outside its own code views that font (apply-root-font.web.ts), and the stretch would
  * take it instead of the line's.
  */
-function Marked({ text, marks, colour, cut }: { text: string; marks: Marks; colour: string; cut: Cut }) {
+function Marked({ text, marks, colour, cut, selectable = true }: { text: string; marks: Marks; colour: string; cut: Cut; selectable?: boolean }) {
   const { code, platform } = useHost();
   const web = platform === "web";
   const fill = (code.lineHeight - code.fontSize * 1.17) / 2;
@@ -602,7 +611,7 @@ function Marked({ text, marks, colour, cut }: { text: string; marks: Marks; colo
   // and copied whole, as a wrapped line is in VS Code. Off the web each row is a text of its own.
   if (web)
     return (
-      <T selectable style={[code, { flex: 1, minWidth: 0, overflow: "hidden" }]}>
+      <T selectable={selectable} style={[code, { flex: 1, minWidth: 0, overflow: "hidden" }]}>
         {rows.map(([from, to], n) => (
           <Text key={from} style={[WEB_ROW, { fontFamily: code.fontFamily }, n > 0 && { paddingLeft: pad }]}>
             {marked(from, to)}
@@ -613,7 +622,7 @@ function Marked({ text, marks, colour, cut }: { text: string; marks: Marks; colo
   return (
     <View style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
       {rows.map(([from, to], n) => (
-        <T key={from} selectable lines={1} style={[code, n > 0 && { paddingLeft: pad }]}>
+        <T key={from} selectable={selectable} lines={1} style={[code, n > 0 && { paddingLeft: pad }]}>
           {marked(from, to)}
         </T>
       ))}
@@ -629,10 +638,11 @@ const WEB_ROW = { display: "inline-block", width: "100%", whiteSpace: "pre", ver
 /** A tab on the web, in a box as wide as it is drawn. */
 const WEB_TAB = { display: "inline-block", overflow: "hidden", verticalAlign: "top" } as object as TextStyle;
 
+/** A line's number. Like the rest of the gutter, it is not selected or copied with the text, as VS Code's margin is not. */
 function LineNumber({ value, width }: { value: number | null; width: number }) {
   const { c, code } = useHost();
   return (
-    <T color={c.foregroundMuted} style={[code, { width, paddingRight: 8, textAlign: "right" }]}>
+    <T selectable={false} color={c.foregroundMuted} style={[code, { width, paddingRight: 8, textAlign: "right" }]}>
       {value === null ? "" : String(value)}
     </T>
   );
@@ -653,7 +663,7 @@ function Indicator({ kind, onFold }: { kind: "same" | "remove" | "add"; onFold?:
       </View>
     );
   return (
-    <T color={c.foregroundMuted} style={[code, { width: 16 }]}>
+    <T selectable={false} color={c.foregroundMuted} style={[code, { width: 16 }]}>
       {kind === "add" ? "+" : kind === "remove" ? "−" : " "}
     </T>
   );
@@ -688,20 +698,25 @@ function InlineLine({ row, width, revealed, onFold, cut }: LineProps & { row: In
   );
 }
 
+/** A side of the side-by-side view: the original's, where lines are removed, or the modified's, where they are added. */
+type Side = "remove" | "add";
+
 /**
  * A row of the side-by-side view: the original on the left, the modified on the right. In a change, a side with no
- * line, or with a line that wraps onto fewer rows than the other's, is filled out below it.
+ * line, or with a line that wraps onto fewer rows than the other's, is filled out below it. `side` is the side a
+ * selection was last started on: the other cannot be selected, so that a selection down one side leaves the other out,
+ * as in VS Code, where each side is an editor of its own (diffEditorEditors.ts: `original` and `modified`).
  */
-function PairLine({ row, width, revealed, onFold, cuts }: LineProps & { row: PairRow; cuts: Cut[] }) {
-  const { c } = useHost();
+function PairLine({ row, width, revealed, onFold, cuts, side, onSide }: LineProps & { row: PairRow; cuts: Cut[]; side: Side | null; onSide: (side: Side) => void }) {
+  const { c, platform } = useHost();
   const colours = useColours();
-  const half = (cell: Cell | null, kind: "remove" | "add", cut: Cut) => (
-    <View style={{ flex: 1 }}>
+  const half = (cell: Cell | null, kind: Side, cut: Cut) => (
+    <View style={{ flex: 1 }} onPointerDown={platform === "web" ? () => onSide(kind) : undefined}>
       {cell && (
         <View style={{ flexDirection: "row", backgroundColor: row.changed ? (kind === "add" ? colours.insertedLine : colours.removedLine) : revealed ? colours.unchanged : undefined }}>
           <LineNumber value={cell.number} width={width} />
           <Indicator kind={row.changed ? kind : "same"} onFold={onFold} />
-          <Marked text={cell.text} marks={cell.marks} colour={kind === "add" ? colours.insertedText : colours.removedText} cut={cut} />
+          <Marked text={cell.text} marks={cell.marks} colour={kind === "add" ? colours.insertedText : colours.removedText} cut={cut} selectable={side === null || side === kind} />
         </View>
       )}
       {row.changed && <Filler gutter={width + 16} />}
