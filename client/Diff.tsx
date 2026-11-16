@@ -164,7 +164,7 @@ const noTabs = new Map<number, number>();
 
 /** The lines, opened at the first change; unchanged ones folded while `collapse` is on; the overview ruler beside them. */
 function Lines({ found, sideBySide, collapse }: { found: Found; sideBySide: boolean; collapse: boolean }) {
-  const { code, compact } = useHost();
+  const { code, compact, platform } = useHost();
   const colours = useColours();
   const list = useRef<FlatList<Item>>(null);
   const rows: (FileRow | Row)[] = useMemo(
@@ -174,14 +174,17 @@ function Lines({ found, sideBySide, collapse }: { found: Found; sideBySide: bool
   const unchanged = useMemo(() => (found.kind === "diff" ? regions(found.changes, found.original.length, found.modified.length) : []), [found]);
   // How much of each region shows, by where it is. Turning the switch on folds them all again, as in VS Code.
   const [opened, setOpened] = useState(new Map<string, Shown>());
-  // On the web, in the side-by-side view, the side a selection was last started on (see PairLine). A press on the other
-  // side first clears the selection: in the page it also holds the rows of this side between its ends, and a press on
-  // one of them would drag the selection instead of starting a new one.
+  // On the web, the version a selection was last started in (see Side). A press in the other first clears the selection:
+  // in the page it also holds the rows of this version between its ends, and a press on one of them would drag the
+  // selection instead of starting a new one.
   const [side, setSide] = useState<Side | null>(null);
-  const startOn = (next: Side) => {
-    if (next === side) return;
-    (globalThis as unknown as { getSelection(): { removeAllRanges(): void } }).getSelection().removeAllRanges(); // the client is typed without the DOM
-    setSide(next);
+  const selecting: Selecting = {
+    side,
+    start: (next) => {
+      if (platform !== "web" || next === side) return;
+      (globalThis as unknown as { getSelection(): { removeAllRanges(): void } }).getSelection().removeAllRanges(); // the client is typed without the DOM
+      setSide(next);
+    },
   };
   // The box the list and the ruler share. The diff scrolls on past its last line until only that line is left in view,
   // as VS Code's editors do by default (editor.scrollBeyondLastLine; viewLayout.ts). A region's bottom edge can then move
@@ -310,9 +313,9 @@ function Lines({ found, sideBySide, collapse }: { found: Found; sideBySide: bool
     const revealed = "region" in item;
     const onFold = revealed && item.first ? () => open(item.region, () => folded) : undefined;
     return "kind" in item ? (
-      <InlineLine row={item} width={digits} revealed={revealed} onFold={onFold} cut={cuts[0]} />
+      <InlineLine row={item} width={digits} revealed={revealed} onFold={onFold} selecting={selecting} cut={cuts[0]} />
     ) : (
-      <PairLine row={item} width={digits} revealed={revealed} onFold={onFold} cuts={cuts} side={side} onSide={startOn} />
+      <PairLine row={item} width={digits} revealed={revealed} onFold={onFold} selecting={selecting} cuts={cuts} />
     );
   };
   return (
@@ -678,55 +681,78 @@ function FileLine({ number, text, width, cut }: { number: number; text: string; 
   );
 }
 
+/**
+ * A version of the file, as a selection keeps to it. VS Code shows each version in an editor of its own side by side
+ * (diffEditorEditors.ts: `original` and `modified`), and inline draws the removed lines apart from the modified's, in a
+ * view zone of their own (diffEditorViewZones.ts: `line-delete-selectable`), so a selection begun in one version leaves
+ * the other out. Here the lines of the other version cannot be selected until a press starts a selection in it.
+ */
+type Side = "original" | "modified";
+
+/** The version a selection was last started in, null before any; `start` is called by a press in a version. */
+interface Selecting {
+  side: Side | null;
+  start: (side: Side) => void;
+}
+
 interface LineProps {
   width: number;
   revealed: boolean; // shown from a folded region
   onFold?: () => void;
+  selecting: Selecting;
 }
 
 /** A line of the inline view, numbered in the original and in the modified version, as VS Code numbers them. */
-function InlineLine({ row, width, revealed, onFold, cut }: LineProps & { row: InlineRow; cut: Cut }) {
+function InlineLine({ row, width, revealed, onFold, selecting, cut }: LineProps & { row: InlineRow; cut: Cut }) {
   const colours = useColours();
   const removed = row.kind === "remove";
+  const side: Side = removed ? "original" : "modified";
   return (
-    <View style={{ flexDirection: "row", backgroundColor: row.kind === "add" ? colours.insertedLine : removed ? colours.removedLine : revealed ? colours.unchanged : undefined }}>
+    <View
+      style={{ flexDirection: "row", backgroundColor: row.kind === "add" ? colours.insertedLine : removed ? colours.removedLine : revealed ? colours.unchanged : undefined }}
+      onPointerDown={() => selecting.start(side)}
+    >
       <LineNumber value={row.original} width={width} />
       <LineNumber value={row.modified} width={width} />
       <Indicator kind={row.kind} onFold={onFold} />
-      <Marked text={row.text} marks={row.marks} colour={removed ? colours.removedText : colours.insertedText} cut={cut} />
+      <Marked text={row.text} marks={row.marks} colour={removed ? colours.removedText : colours.insertedText} cut={cut} selectable={selecting.side === null || selecting.side === side} />
     </View>
   );
 }
 
-/** A side of the side-by-side view: the original's, where lines are removed, or the modified's, where they are added. */
-type Side = "remove" | "add";
-
 /**
  * A row of the side-by-side view: the original on the left, the modified on the right. In a change, a side with no
- * line, or with a line that wraps onto fewer rows than the other's, is filled out below it. `side` is the side a
- * selection was last started on: the other cannot be selected, so that a selection down one side leaves the other out,
- * as in VS Code, where each side is an editor of its own (diffEditorEditors.ts: `original` and `modified`).
+ * line, or with a line that wraps onto fewer rows than the other's, is filled out below it.
  */
-function PairLine({ row, width, revealed, onFold, cuts, side, onSide }: LineProps & { row: PairRow; cuts: Cut[]; side: Side | null; onSide: (side: Side) => void }) {
-  const { c, platform } = useHost();
+function PairLine({ row, width, revealed, onFold, selecting, cuts }: LineProps & { row: PairRow; cuts: Cut[] }) {
+  const { c } = useHost();
   const colours = useColours();
-  const half = (cell: Cell | null, kind: Side, cut: Cut) => (
-    <View style={{ flex: 1 }} onPointerDown={platform === "web" ? () => onSide(kind) : undefined}>
-      {cell && (
-        <View style={{ flexDirection: "row", backgroundColor: row.changed ? (kind === "add" ? colours.insertedLine : colours.removedLine) : revealed ? colours.unchanged : undefined }}>
-          <LineNumber value={cell.number} width={width} />
-          <Indicator kind={row.changed ? kind : "same"} onFold={onFold} />
-          <Marked text={cell.text} marks={cell.marks} colour={kind === "add" ? colours.insertedText : colours.removedText} cut={cut} selectable={side === null || side === kind} />
-        </View>
-      )}
-      {row.changed && <Filler gutter={width + 16} />}
-    </View>
-  );
+  const half = (cell: Cell | null, side: Side, cut: Cut) => {
+    const kind = side === "original" ? "remove" : "add";
+    return (
+      <View style={{ flex: 1 }} onPointerDown={() => selecting.start(side)}>
+        {cell && (
+          <View style={{ flexDirection: "row", backgroundColor: row.changed ? (kind === "add" ? colours.insertedLine : colours.removedLine) : revealed ? colours.unchanged : undefined }}>
+            <LineNumber value={cell.number} width={width} />
+            <Indicator kind={row.changed ? kind : "same"} onFold={onFold} />
+            <Marked
+              text={cell.text}
+              marks={cell.marks}
+              colour={kind === "add" ? colours.insertedText : colours.removedText}
+              cut={cut}
+              selectable={selecting.side === null || selecting.side === side}
+            />
+          </View>
+        )}
+        {row.changed && <Filler gutter={width + 16} />}
+      </View>
+    );
+  };
   return (
     <View style={{ flexDirection: "row" }}>
-      {half(row.left, "remove", cuts[0])}
+      {half(row.left, "original", cuts[0])}
       <View style={{ width: 1, backgroundColor: c.border }} />
-      {half(row.right, "add", cuts[1])}
+      {half(row.right, "modified", cuts[1])}
     </View>
   );
 }
