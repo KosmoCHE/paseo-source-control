@@ -4,6 +4,7 @@
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Text, View } from "react-native";
+export { FlatList, TextInput } from "react-native";
 
 /** The panel only uses inline SVG. The host draws it at the size asked for, in the colour asked for. */
 export function Icon({ icon, size = 24, color }: { icon: { svg: string }; size?: number; color?: string }) {
@@ -55,6 +56,6 @@ export function Modal({ title, open, children }: { title: string; open: boolean;
     document.body,
   );
 }
-Modal.Content = function Content({ children }: { children: ReactNode }) {
-  return <View style={{ padding: 24, gap: 16 }}>{children}</View>;
+Modal.Content = function Content({ children, scrollable = true }: { children: ReactNode; scrollable?: boolean }) {
+  return <View style={scrollable ? { padding: 24, gap: 16 } : { height: Math.min(480, window.innerHeight * 0.65) }}>{children}</View>;
 };

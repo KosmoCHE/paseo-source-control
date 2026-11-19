@@ -12,6 +12,7 @@ import { appendFile, readFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
 import type { RpcInput, RpcOutput } from "@getpaseo/plugin";
+import { REF_SEARCH_LIMIT, scopeSchema } from "../shared/git.ts";
 import type {
   Commit,
   FileChange,
@@ -22,6 +23,7 @@ import type {
   ignoreRpc,
   logRpc,
   markersRpc,
+  refsRpc,
   remotesRpc,
   removeRpc,
   showRpc,
@@ -423,26 +425,68 @@ export function parseLog(out: string): Commit[] {
     });
 }
 
+const REF_NAMESPACES = ["refs/heads", "refs/remotes", "refs/tags"];
+const remoteHead = (id: string) => id.startsWith(REMOTES) && id.endsWith("/HEAD");
+
+/** VS Code's HistoryItemRefPicker searches the display name, without the namespace. Filter before limiting the Git output. */
+export async function refs({ cwd, query }: RpcInput<typeof refsRpc>): Promise<RpcOutput<typeof refsRpc>> {
+  // These glob characters (and NUL) cannot occur in any Git ref name.
+  if (/[\0*?\[\\]/.test(query)) return { refs: [], more: false };
+  // Match names without ASCII case distinctions while keeping Git's namespaces case-sensitive.
+  const text = query.replace(/[a-z]/gi, (c) => `[${c.toLowerCase()}${c.toUpperCase()}]`);
+  const patterns = REF_NAMESPACES.flatMap((ns) => text ? [`${ns}/**/*${text}*`, `${ns}/**/*${text}*/**`] : [ns]);
+  const out = await git(cwd, ["for-each-ref", "--format=%(refname)", `--count=${REF_SEARCH_LIMIT + 1}`, "--", ...patterns]);
+  const found = out.split("\n").filter(Boolean);
+  // Hide remote HEAD aliases even on Git before 2.42 (no --exclude). `more` means the raw search was truncated.
+  return { refs: found.filter((id) => !remoteHead(id)).slice(0, REF_SEARCH_LIMIT), more: found.length > REF_SEARCH_LIMIT };
+}
+
+/** Resolve exact IDs to revisions, as in VS Code's _resolveHistoryItemFilter. A deleted foo must never enumerate foo/* instead. */
+async function refTips(cwd: string, ids: string[]) {
+  const tips = new Map<string, { oid: string; upstream: string }>();
+  for (const part of chunks(ids.filter((id) => !remoteHead(id)))) {
+    // A literal for-each-ref pattern matches a whole subtree. Escaping its final character forces an anchored glob instead.
+    const exact = part.map((id) => id.replace(/.$/su, "\\$&"));
+    const out = await git(cwd, ["for-each-ref", "--format=%(refname)%00%(objectname)%00%(upstream)", `--count=${part.length}`, "--", ...exact]);
+    for (const line of out.split("\n").filter(Boolean)) {
+      const [id, oid, upstream] = line.split("\0");
+      tips.set(id, { oid, upstream });
+    }
+  }
+  return tips;
+}
+
 export async function log({ cwd, scope, limit }: RpcInput<typeof logRpc>): Promise<RpcOutput<typeof logRpc>> {
-  // The checked-out branch's upstream, as a full ref name; nothing without one.
-  const upstream = (await git(cwd, ["for-each-ref", "--format=%(if)%(HEAD)%(then)%(upstream)%(end)", "refs/heads"])).trim();
-  const tips = scope === "all" ? ["--branches", "--remotes", "--tags"] : await tracked(cwd, upstream);
+  scopeSchema.parse(scope);
+  const head = (await git(cwd, ["symbolic-ref", "--quiet", "HEAD"], { accept: [1] })).split("\n")[0]; // empty when detached
+  const selected = Array.isArray(scope) ? [...new Set(scope)] : [];
+  const tips = await refTips(cwd, [...new Set([...selected, ...(head ? [head] : [])])]);
+  if (Array.isArray(scope)) {
+    scope = selected.filter((id) => tips.has(id));
+    if (!scope.length) scope = "current";
+  }
+  const current = tips.get(head);
+  const upstream = current?.upstream ?? "";
+  // Never seed a manual selection with HEAD. Pass the resolved object IDs, not revision expressions or ambiguous short names.
+  let revisions: string[];
+  if (Array.isArray(scope)) revisions = scope.map((id) => tips.get(id)!.oid);
+  else if (scope === "all") revisions = ["--ignore-missing", "HEAD", "--branches", "--remotes", "--tags"];
+  else {
+    const base = current && await baseOf(cwd, head.slice("refs/heads/".length));
+    revisions = ["--ignore-missing", "HEAD", upstream, base ? REMOTES + base : ""].filter(Boolean);
+  }
+
+  // scmHistoryViewPane gates each pending row on its own ref ID, not on another ref reaching the same commit.
+  const incoming = !Array.isArray(scope) || scope.includes(upstream);
+  const outgoing = !Array.isArray(scope) || scope.includes(head);
   const [out, sync] = await Promise.all([
-    git(cwd, [
-    "log",
-    "--date-order",
-    "--decorate=full",
-    "--format=" + FORMAT,
-    "--max-count=" + (limit + 1), // one more tells whether there is more
-    "--ignore-missing",
-    "HEAD",
-    ...tips,
-    "--",
-  ]),
-    syncOf(cwd, upstream),
+    git(cwd, ["log", "--date-order", "--decorate=full", "--format=" + FORMAT, "--max-count=" + (limit + 1), ...revisions, "--"]),
+    incoming || outgoing ? syncOf(cwd, upstream) : null,
   ]);
+  if (sync && !incoming) sync.showIncoming = false;
+  if (sync && !outgoing) sync.showOutgoing = false;
   const commits = parseLog(out);
-  return { commits: commits.slice(0, limit), more: commits.length > limit, sync };
+  return { scope, commits: commits.slice(0, limit), more: commits.length > limit, sync };
 }
 
 /** Where HEAD and `upstream` stand, for VS Code's Incoming and Outgoing Changes: null when they are one commit, or have none in common. */
@@ -454,14 +498,6 @@ async function syncOf(cwd: string, upstream: string): Promise<RpcOutput<typeof l
   if (!head || !tip || head === tip) return null;
   const base = (await git(cwd, ["merge-base", head, tip], { accept: [1] })).trim();
   return base ? { head, upstream: tip, base } : null;
-}
-
-/** What VS Code's Auto shows besides HEAD: the checked-out branch's upstream, and the branch on a remote it was made from. */
-async function tracked(cwd: string, upstream: string): Promise<string[]> {
-  // --ignore-missing, in the log, covers an upstream that was deleted.
-  const branch = (await git(cwd, ["symbolic-ref", "--quiet", "--short", "HEAD"], { accept: [1] })).trim(); // nothing when HEAD is detached
-  const base = branch && (await baseOf(cwd, branch));
-  return [upstream, base ? REMOTES + base : ""].filter(Boolean);
 }
 
 /** Reads `--name-status -z`: status, path, and for a rename the old path before the new one. */

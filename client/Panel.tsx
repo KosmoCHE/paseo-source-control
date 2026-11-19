@@ -6,7 +6,7 @@ import type { PluginTab, PluginWorkspacePanelProps } from "@getpaseo/plugin/clie
 import { useRpc, useTabState, useWorkspace } from "@getpaseo/plugin/client";
 import { Loading } from "@getpaseo/plugin/client/ui";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { FlatList, Pressable, View } from "react-native";
 import { z } from "zod";
 import { logRpc, repositoriesRpc, scopeSchema } from "../shared/git";
@@ -27,14 +27,15 @@ const PAGE = 200; // commits read at first, and added by each "Load more"
 const NONE: Commit[] = [];
 
 const viewSchema = z.object({
-  scope: scopeSchema,
+  scope: z.enum(["current", "all"]), // default for this tab; keep the old two-way switch's value on upgrade
+  scopes: z.record(z.string(), scopeSchema).default({}), // VS Code's history filter is per repository
   folded: z.array(z.string()), // the titles of the folded sections, and "group:<title>" for the folded groups of changes
   selected: z.string().nullable(), // a repository's root; null: the first one
   parent: z.boolean(), // the repository above the workspace's folder was asked for
   sizes: sizesSchema,
 });
 type ViewState = z.infer<typeof viewSchema>;
-const VIEW: ViewState = { scope: "all", folded: [], selected: null, parent: false, sizes: { changes: null } };
+const VIEW: ViewState = { scope: "current", scopes: {}, folded: [], selected: null, parent: false, sizes: { changes: null } };
 
 export function Panel({ theme, layout, workspaceId, tab }: PluginWorkspacePanelProps) {
   const directory = useWorkspace(workspaceId, (workspace) => workspace.directory);
@@ -72,6 +73,8 @@ function Workspace({ directory, workspaceId, tab }: { directory: string; workspa
     );
   const selected = list.find((repository) => repository.root === view.selected) ?? list[0];
   const cwd = selected.root;
+  const scope = view.scopes[cwd] ?? view.scope;
+  const setScope = (next: Scope) => setView({ ...view, scopes: { ...view.scopes, [cwd]: next } });
   const fold = (title: string) => setView({ ...view, folded: toggle(view.folded, title) });
   const section = (title: string) => ({ title, folded: view.folded.includes(title), onFold: () => fold(title) });
   const folded = { repositories: view.folded.includes("Repositories"), changes: view.folded.includes("Changes"), graph: view.folded.includes("Graph") };
@@ -95,8 +98,8 @@ function Workspace({ directory, workspaceId, tab }: { directory: string; workspa
         }}
         graph={{
           ...section("Graph"),
-          actions: <GraphActions cwd={cwd} scope={view.scope} onScope={(scope) => setView({ ...view, scope })} />,
-          body: !folded.graph && <History key={cwd} cwd={cwd} workspaceId={workspaceId} scope={view.scope} />,
+          actions: <GraphActions cwd={cwd} scope={scope} onScope={setScope} />,
+          body: !folded.graph && <History key={JSON.stringify([cwd, scope])} cwd={cwd} workspaceId={workspaceId} scope={scope} onScope={setScope} />,
         }}
       />
     </>
@@ -116,7 +119,7 @@ function WorkingTree({ cwd, workspaceId, folded, onFold }: { cwd: string; worksp
 }
 
 /** The selected repository's commit graph. It is not there while the graph is folded, and reads no history then. */
-function History({ cwd, workspaceId, scope }: { cwd: string; workspaceId: string; scope: Scope }) {
+function History({ cwd, workspaceId, scope, onScope }: { cwd: string; workspaceId: string; scope: Scope; onScope: (scope: Scope) => void }) {
   const { c, row } = useHost();
   const [limit, setLimit] = useState(PAGE);
   const [open, setOpen] = useState<string | null>(null); // the commit whose details show
@@ -126,9 +129,14 @@ function History({ cwd, workspaceId, scope }: { cwd: string; workspaceId: string
     // The history is read again whenever HEAD or any ref has moved.
     queryKey: key("log", cwd, scope, limit, status?.head, status?.branch, status?.refs),
     queryFn: () => read({ cwd, scope, limit }),
-    enabled: Boolean(status?.head),
+    enabled: Boolean(status),
     placeholderData: keepPreviousData,
   });
+  const resolved = history.data?.scope;
+  useEffect(() => {
+    // As in VS Code, forget refs deleted since the selection was saved; with none left return to Auto.
+    if (!history.isPlaceholderData && Array.isArray(scope) && resolved && (!Array.isArray(resolved) || resolved.length !== scope.length)) onScope(resolved);
+  }, [scope, resolved, history.isPlaceholderData, onScope]);
   const commits = history.data?.commits ?? NONE;
   const sync = history.data?.sync ?? null;
   const branch = status?.branch ?? status?.head?.slice(0, 7) ?? "";
@@ -136,7 +144,7 @@ function History({ cwd, workspaceId, scope }: { cwd: string; workspaceId: string
   // As in VS Code, the changes to pull and to push get a row each, from where the branch and its upstream parted.
   const rows = useMemo(() => withPending(commits, sync, { branch, upstream }), [commits, sync, branch, upstream]);
   const rails = useMemo(() => lanes(rows), [rows]);
-  const followed = useMemo<Followed>(() => ({ upstream: status?.upstream ?? null, base: status?.base ?? null, all: scope === "all" }), [status?.upstream, status?.base, scope]);
+  const followed = useMemo<Followed>(() => ({ upstream: status?.upstream ?? null, base: status?.base ?? null, scope }), [status?.upstream, status?.base, scope]);
   const extra = useMemo(() => ({ open, followed }), [open, followed]); // what the rows show besides the commits
   if (!status) return null;
   return (
@@ -159,10 +167,10 @@ function History({ cwd, workspaceId, scope }: { cwd: string; workspaceId: string
       ListFooterComponent={
         history.error ? (
           <Notice failed>{history.error.message}</Notice>
-        ) : status.head === null ? (
-          <Notice>No commits yet.</Notice>
         ) : !history.data ? (
           <Loading />
+        ) : !commits.length ? (
+          <Notice>No commits yet.</Notice>
         ) : history.data.more ? (
           <Pressable accessibilityRole="button" onPress={() => setLimit(limit + PAGE)} style={{ height: row + 8, alignItems: "center", justifyContent: "center" }}>
             <T color={c.accent}>{history.isPlaceholderData ? "Loading…" : "Load more"}</T>

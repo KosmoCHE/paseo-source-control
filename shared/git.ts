@@ -87,17 +87,33 @@ export const statusRpc = defineRpc({
 });
 export type Status = z.infer<typeof statusRpc.output>;
 
-export const scopeSchema = z.enum(["current", "all"]); // current: the checked-out branch, its upstream and the branch it was made from
+export const REF_SEARCH_LIMIT = 100;
+export const MAX_REF_QUERY_LENGTH = 256;
+export const MAX_SELECTED_REFS = 100;
+
+// Full IDs, as in VS Code's provideHistoryItemRefs. Apply git check-ref-format's rules, not revision syntax.
+const historyRef = z
+  .string()
+  .regex(/^refs\/(?:heads|remotes|tags)\/./su)
+  .refine((id) => !/[\x00-\x20\x7f~^:?*\[\\]|\.\.|@\{|\/(?:\.|\/)|\.lock(?:\/|$)|[./]$/.test(id), "Invalid Git ref name");
+export const scopeSchema = z.union([z.enum(["current", "all"]), z.array(historyRef).max(MAX_SELECTED_REFS)]);
 export type Scope = z.infer<typeof scopeSchema>;
+
+export const refsRpc = defineRpc({
+  name: "git.refs",
+  input: z.object({ cwd: z.string(), query: z.string().max(MAX_REF_QUERY_LENGTH) }),
+  output: z.object({ refs: z.array(historyRef).max(REF_SEARCH_LIMIT), more: z.boolean() }),
+});
 
 export const logRpc = defineRpc({
   name: "git.log",
   input: z.object({ cwd: z.string(), scope: scopeSchema, limit: z.number().int().positive() }),
   output: z.object({
+    scope: scopeSchema, // the remaining selected IDs, or Auto when none still exist
     commits: z.array(commitSchema),
     more: z.boolean(),
-    // Where HEAD and its upstream stand when they differ: their commits, and the last commit they share.
-    sync: z.object({ head: hash, upstream: hash, base: hash }).nullable(),
+    // The two tips and their common ancestor. A manual selection can hide either one's pending changes.
+    sync: z.object({ head: hash, upstream: hash, base: hash, showIncoming: z.boolean().optional(), showOutgoing: z.boolean().optional() }).nullable(),
   }),
 });
 
@@ -146,7 +162,13 @@ export const diffRpc = defineRpc({
     z.object({ kind: z.literal("binary") }),
     // A file added, deleted, untracked or in conflict: VS Code opens it as it is, not as a diff.
     z.object({ kind: z.literal("file"), lines: z.array(z.string()) }),
-    z.object({ kind: z.literal("diff"), original: z.array(z.string()), modified: z.array(z.string()), changes: z.array(lineChangeSchema), hitTimeout: z.boolean() }),
+    z.object({
+      kind: z.literal("diff"),
+      original: z.array(z.string()),
+      modified: z.array(z.string()),
+      changes: z.array(lineChangeSchema),
+      hitTimeout: z.boolean(),
+    }),
   ]),
 });
 export type FileDiff = z.infer<typeof diffRpc.output>;
@@ -163,7 +185,11 @@ export const discardRpc = defineRpc({ name: "git.discard", input: files.extend({
 /** Removes files from the working tree and the index: VS Code's Delete File for a file deleted on one side of a merge. */
 export const removeRpc = defineRpc({ name: "git.remove", input: files, output: nothing });
 /** The files among `paths` that still hold conflict markers. */
-export const markersRpc = defineRpc({ name: "git.markers", input: z.object({ cwd: z.string(), paths: z.array(z.string()) }), output: z.object({ paths: z.array(z.string()) }) });
+export const markersRpc = defineRpc({
+  name: "git.markers",
+  input: z.object({ cwd: z.string(), paths: z.array(z.string()) }),
+  output: z.object({ paths: z.array(z.string()) }),
+});
 
 /** Adds paths, relative to the repository's root, to its .gitignore. */
 export const ignoreRpc = defineRpc({ name: "git.ignore", input: z.object({ cwd: z.string(), paths: z.array(z.string()).min(1) }), output: nothing });

@@ -6,6 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
+import { logRpc, MAX_REF_QUERY_LENGTH, MAX_SELECTED_REFS, REF_SEARCH_LIMIT, refsRpc } from "../shared/git.ts";
 
 // The module reads the environment once: keep the user's git config, hooks and signing out of it.
 Object.assign(process.env, {
@@ -16,14 +17,16 @@ Object.assign(process.env, {
   GIT_COMMITTER_NAME: "Ada",
   GIT_COMMITTER_EMAIL: "ada@example.com",
 });
-const { baseOf, commit, compare, discard, ignore, log, markers, remotes, remove, show, stage, status, sync, unstage } = await import("../server/git.ts");
+const { baseOf, commit, compare, discard, ignore, log, markers, refs, remotes, remove, show, stage, status, sync, unstage } = await import("../server/git.ts");
 const { diff } = await import("../server/diff.ts");
 
 /** The line ranges of a diff's changes, before and after. */
 const ranges = (result: Awaited<ReturnType<typeof diff>>) => (result.kind === "diff" ? result.changes.map((change) => [change.original, change.modified]) : result.kind);
 
 function repository(t: TestContext) {
-  const cwd = mkdtempSync(join(tmpdir(), "source-control-"));
+  const scratch = join(import.meta.dirname, "../tmp");
+  mkdirSync(scratch, { recursive: true });
+  const cwd = mkdtempSync(join(scratch, "source-control-"));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   const git = (...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
   const write = (path: string, text: string) => writeFileSync(join(cwd, path), text);
@@ -178,6 +181,114 @@ test("history carries parents and refs, and a merge shows what it brought in", a
   assert.notEqual((await status({ cwd })).refs, before);
 });
 
+test("the ref picker limits matches, not the refs it searches", async (t) => {
+  const { cwd, git } = repository(t);
+  git("commit", "--quiet", "--allow-empty", "--message=root");
+  const oid = git("rev-parse", "HEAD");
+  const names = Array.from({ length: REF_SEARCH_LIMIT }, (_, n) => `refs/heads/archive/${String(n).padStart(4, "0")}`);
+  execFileSync("git", ["update-ref", "--stdin"], { cwd, input: names.map((id) => `create ${id} ${oid}\n`).join("") });
+  git("branch", "team/Release/topic");
+  git("tag", "team/Release/topic");
+  git("update-ref", "refs/remotes/origin/team/Release/topic", oid);
+  git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/team/Release/topic");
+  git("update-ref", "refs/remotes/other/head", oid);
+  git("pack-refs", "--all");
+
+  assert.deepEqual(await refs({ cwd, query: "" }), { refs: names, more: true });
+  assert.deepEqual(await refs({ cwd, query: "archive" }), { refs: names, more: false });
+  const matches = ["refs/heads/team/Release/topic", "refs/remotes/origin/team/Release/topic", "refs/tags/team/Release/topic"];
+  for (const query of ["RELEASE", "m/relea", "lease/to", "TEAM/RELEASE/TOPIC"]) {
+    assert.deepEqual(await refs({ cwd, query }), { refs: matches, more: false });
+  }
+  assert.deepEqual(await refs({ cwd, query: "head" }), { refs: ["refs/remotes/other/head"], more: false });
+  // A hidden remote HEAD still counts toward truncation of the raw search.
+  git("symbolic-ref", "refs/remotes/archive/HEAD", "refs/heads/main");
+  assert.deepEqual(await refs({ cwd, query: "archive" }), { refs: names, more: true });
+  for (const query of ["refs/heads", "*", "?", "[", "--count=1"]) {
+    assert.deepEqual(await refs({ cwd, query }), { refs: [], more: false });
+  }
+  assert.equal(refsRpc.input.safeParse({ cwd, query: "a".repeat(MAX_REF_QUERY_LENGTH + 1) }).success, false);
+});
+
+test("manual history uses just the chosen ref IDs, pages commits and leaves the worktree alone", async (t) => {
+  const { cwd, git, write } = repository(t);
+  git("commit", "--quiet", "--allow-empty", "--message=root");
+  git("tag", "--annotate", "release", "--message=tag");
+  const remote = "refs/remotes/origin/release";
+  git("update-ref", remote, git("commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "remote"));
+  git("commit", "--quiet", "--allow-empty", "--message=local");
+  git("branch", "release");
+  git("commit", "--quiet", "--allow-empty", "--message=checked out");
+  write("dirty", "staged\n");
+  git("add", "dirty");
+  write("dirty", "unstaged\n");
+  const snapshot = () => [git("symbolic-ref", "HEAD"), git("show-ref", "--head"), git("ls-files", "--stage"), readFileSync(join(cwd, "dirty"), "utf8")];
+  const before = snapshot();
+  const branch = "refs/heads/release", tag = "refs/tags/release";
+  const read = (scope: string[], limit = 10) => log({ cwd, scope, limit });
+  const subjects = (page: Awaited<ReturnType<typeof log>>) => page.commits.map((c) => c.subject);
+  assert.deepEqual(subjects(await read([tag])), ["root"]);
+  assert.deepEqual(subjects(await read([branch])), ["local", "root"]);
+  assert.deepEqual(subjects(await read([remote])), ["remote", "root"]);
+  const selected = [branch, remote, tag];
+  const first = await read(selected, 2);
+  const full = await read(selected, 3);
+  assert.deepEqual(full.scope, selected);
+  assert.deepEqual(subjects(full).sort(), ["local", "remote", "root"]);
+  assert.deepEqual(first.commits, full.commits.slice(0, 2));
+  assert.equal(first.more, true);
+  assert.equal(full.more, false);
+  assert.deepEqual(snapshot(), before);
+});
+
+test("a saved filter drops missing IDs exactly, returning Auto only when none survive", async (t) => {
+  const { cwd, git } = repository(t);
+  const stale = "refs/heads/topic", kept = "refs/tags/topic";
+  git("commit", "--quiet", "--allow-empty", "--message=root");
+  git("branch", "topic");
+  git("tag", "topic");
+  const read = (scope: string[]) => log({ cwd, scope, limit: 10 });
+  assert.deepEqual((await read([stale, kept])).scope, [stale, kept]);
+  git("update-ref", "-d", stale);
+  git("commit", "--quiet", "--allow-empty", "--message=current");
+  git("branch", "topic/child");
+  git("branch", "refs/heads/topic"); // revision parsing would find this short name for the deleted full ID
+  const partial = await read([stale, kept, kept]);
+  assert.deepEqual(partial.scope, [kept]);
+  assert.deepEqual(partial.commits.map((c) => c.subject), ["root"]);
+  git("tag", "--delete", "topic");
+  const auto = await log({ cwd, scope: "current", limit: 10 });
+  assert.equal(auto.scope, "current");
+  assert.deepEqual(await read([stale, kept]), auto);
+  assert.deepEqual(await read([]), auto);
+});
+
+test("the ref contract rejects revision expressions, flags and unsupported namespaces", async (t) => {
+  const { cwd } = repository(t);
+  for (const id of ["HEAD", "--all", "main", "refs/stash", "refs/heads/a..b", "refs/heads/a~1", "refs/heads/a^", "refs/tags/v^{commit}",
+    "refs/heads/main@{1}", "refs/heads/main:file", "refs/heads/m*", "refs/heads/.hidden", "refs/heads/space here", "refs/heads/a\nb"]) {
+    const input = { cwd, scope: [id], limit: 1 };
+    assert.equal(logRpc.input.safeParse(input).success, false, id);
+    await assert.rejects(log(input));
+  }
+  assert.equal(logRpc.input.safeParse({ cwd, limit: 1, scope: Array(MAX_SELECTED_REFS + 1).fill("refs/heads/main") }).success, false);
+});
+
+test("without a HEAD commit, Auto is empty but a selected tag can still have history", async (t) => {
+  const { cwd, git } = repository(t);
+  assert.deepEqual(await refs({ cwd, query: "" }), { refs: [], more: false });
+  assert.deepEqual(await log({ cwd, scope: ["refs/heads/missing"], limit: 10 }), { scope: "current", commits: [], more: false, sync: null });
+  git("commit", "--quiet", "--allow-empty", "--message=tagged");
+  git("tag", "keep");
+  git("symbolic-ref", "HEAD", "refs/heads/unborn");
+  assert.deepEqual((await log({ cwd, scope: "current", limit: 10 })).commits, []);
+  for (const scope of ["all" as const, ["refs/tags/keep"]]) {
+    const page = await log({ cwd, scope, limit: 10 });
+    assert.deepEqual(page.scope, scope);
+    assert.deepEqual(page.commits.map((c) => c.subject), ["tagged"]);
+  }
+});
+
 test("the branch a branch was made from, found as VS Code finds it, and Auto showing it", async (t) => {
   const { cwd, git, write } = repository(t);
   write("a.txt", "a\n");
@@ -266,6 +377,14 @@ test("where the branch and its upstream parted, and what a pull and a push would
 
   const { sync } = await log({ cwd, scope: "current", limit: 10 });
   assert.deepEqual(sync, { head, upstream, base: root });
+  const localId = "refs/heads/main", remoteId = "refs/remotes/origin/main";
+  git("tag", "main", head); // same name and same tip as the checked-out branch, but not its ID
+  git("tag", "remote", upstream);
+  const manual = async (...scope: string[]) => (await log({ cwd, scope, limit: 10 })).sync;
+  assert.equal(await manual("refs/tags/main", "refs/tags/remote"), null);
+  assert.deepEqual(await manual(localId, "refs/tags/remote"), { ...sync, showIncoming: false });
+  assert.deepEqual(await manual(remoteId, "refs/tags/main"), { ...sync, showOutgoing: false });
+  assert.deepEqual(await manual(localId, remoteId), sync);
   const incoming = await compare({ cwd, from: root, to: upstream });
   assert.deepEqual(incoming.files, [{ path: "a.txt", status: "M" }]);
   assert.deepEqual(ranges(await diff({ cwd, source: { kind: "incoming", from: root, to: upstream }, file: incoming.files[0] })), [[[1, 2], [1, 2]]]);

@@ -42,6 +42,14 @@ test("only behind, or only ahead: one row", () => {
   );
 });
 
+test("a tip reached through a different reference does not get a pending row", () => {
+  const sync = { head: "H2", upstream: "U2", base: "B" };
+  for (const kind of ["incoming", "outgoing"] as const) {
+    const visible = { ...sync, showIncoming: kind === "incoming", showOutgoing: kind === "outgoing" };
+    assert.deepEqual(withPending(commits, visible, names).flatMap((row) => row.pending?.kind ?? []), [kind]);
+  }
+});
+
 test("a row whose place is not loaded yet is left out", () => {
   const loaded = commits.slice(0, 4); // the shared commit is on a later page
   assert.deepEqual(

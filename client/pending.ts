@@ -24,7 +24,7 @@ export function withPending(commits: Commit[], sync: Sync, names: Names): Row[] 
   if (!sync) return commits;
   const rows: Row[] = [...commits];
   const index = (hash: string) => rows.findIndex((row) => row.hash === hash);
-  if (sync.upstream !== sync.base) {
+  if (sync.showIncoming !== false && sync.upstream !== sync.base) {
     // Down the upstream's line by first parents, to the commit that comes after the shared one: it now comes after the row.
     const byHash = new Map(commits.map((commit) => [commit.hash, commit]));
     let last = byHash.get(sync.upstream);
@@ -36,7 +36,7 @@ export function withPending(commits: Commit[], sync: Sync, names: Names): Row[] 
       rows.splice(at, 0, { hash: "incoming", parents: [sync.base], author: names.upstream, time: 0, subject: "Incoming Changes", refs: [], pending });
     }
   }
-  if (sync.head !== sync.base) {
+  if (sync.showOutgoing !== false && sync.head !== sync.base) {
     const at = index(sync.head);
     if (at !== -1) {
       const pending: Pending = { kind: "outgoing", from: sync.base, to: sync.head };

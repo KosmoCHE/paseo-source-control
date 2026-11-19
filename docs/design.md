@@ -49,6 +49,8 @@ Text is Paseo's, in its font and smoothed as Paseo smooths it. Code in the diff 
 | No action switches or creates branches | Branches are the agents' to manage |
 | The Repositories section always shows | With no status bar, it is the only place the branch and its sync state show |
 | Long lines wrap in the diff | The diff tab is often narrow |
+| The graph's reference picker searches by part of a name and shows up to 100 matches, without tip hashes; up to 100 references can be selected individually | The picker queries Git on the daemon. Narrowing the search reaches other names without transferring every ref and revision to the client. **All** has no selection limit |
+| The graph remembers reference choices per repository in the panel tab | Paseo provides tab state rather than VS Code's workspace storage |
 | A commit's card shows above the graph, not beside its row | A plugin can draw nothing outside its panel; above the graph the card leaves every commit in view |
 | While a card shows, another commit's takes its place once the pointer has rested on it for 150 milliseconds, not at once | On its way up to the card the pointer crosses other commits |
 | The diff's code is 16 pixels, whatever size is set in Paseo or in VS Code | Paseo does not tell plugins its "Code size", and VS Code's settings are never read; 16 is chosen for this panel |

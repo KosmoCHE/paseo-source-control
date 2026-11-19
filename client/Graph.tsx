@@ -16,11 +16,12 @@ import { ago } from "./ago";
 import * as codicon from "./codicons";
 import { showDiff } from "./diffTab";
 import { FileTree } from "./Files";
-import { key, useCommand } from "./git";
+import { key, useCommand, useStatus } from "./git";
+import { ReferencePicker } from "./ReferencePicker";
 import { width } from "./lanes";
 import type { Rail } from "./lanes";
 import type { Pending, Row } from "./pending";
-import { IconButton, Notice, T, Tint, isDark, useHint, useHost, useHoverCard, useRowHover } from "./ui";
+import { IconButton, Notice, T, Tint, isDark, useHost, useHoverCard, useRowHover } from "./ui";
 
 const LANE = 12; // between two lanes
 const LINE = 2;
@@ -37,12 +38,12 @@ const BASE = "#EA5C00";
 
 /**
  * The refs the graph colours, as VS Code does: the checked-out branch, its upstream, and the branch it was made from;
- * with every branch shown, each other ref too, in its commit's lane colour. A ref left uncoloured is not shown.
+ * the remaining refs in the filter take their commit's lane colour. A ref left uncoloured is not shown.
  */
 export interface Followed {
   upstream: string | null;
   base: string | null;
-  all: boolean;
+  scope: Scope;
 }
 
 /** A lane keeps one colour all the way down. */
@@ -123,9 +124,11 @@ function Badges({ refs, rail, followed, card }: { refs: Ref[]; rail: Rail; follo
   const paint = usePaint();
   const colour = (ref: Ref) => {
     if (ref.kind === "head") return c.accent;
-    if (ref.kind !== "tag" && ref.name === followed.upstream) return isDark(c.surface0) ? UPSTREAM.dark : UPSTREAM.light;
+    if (ref.kind === "remote" && ref.name === followed.upstream) return isDark(c.surface0) ? UPSTREAM.dark : UPSTREAM.light;
     if (ref.kind === "remote" && ref.name === followed.base) return BASE;
-    return followed.all ? paint(rail.col) : null;
+    const namespace = { branch: "heads", remote: "remotes", tag: "tags" }[ref.kind];
+    const scope = followed.scope;
+    return scope === "all" || (Array.isArray(scope) && scope.includes(`refs/${namespace}/${ref.name}`)) ? paint(rail.col) : null;
   };
   // On a coloured badge VS Code writes in the panel's background colour; the checked-out branch keeps the theme's pair.
   const shown = refs.flatMap((ref) => {
@@ -338,27 +341,15 @@ function Under({ rail, children }: { rail: Rail; children: ReactNode }) {
 
 /** The buttons in the graph's title bar: they pick its branches and reach the remote. */
 export function GraphActions({ cwd, scope, onScope }: { cwd: string; scope: Scope; onScope: (scope: Scope) => void }) {
-  const { c, small } = useHost();
+  const status = useStatus(cwd).data;
   const toast = useToast();
   const queries = useQueryClient();
   const sync = useCommand(syncRpc, cwd);
   const run = (action: "fetch" | "pull" | "push", done: string) => sync.mutate({ action }, { onSuccess: () => toast.show(done, { variant: "success" }) });
-  const scopeHint = useHint(scope === "all" ? "All branches are shown. Show only the current branch and its upstream" : "The current branch and its upstream are shown. Show all branches");
+  const autoHint = [status?.branch ?? status?.head?.slice(0, 7), status?.upstream, status?.base].filter(Boolean).join(", ");
   return (
     <>
-      <Pressable
-        {...scopeHint}
-        accessibilityRole="button"
-        accessibilityLabel={scope === "all" ? "Showing all branches. Show the current branch only" : "Showing the current branch. Show all branches"}
-        hitSlop={4}
-        onPress={() => onScope(scope === "all" ? "current" : "all")}
-        style={{ flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 4 }}
-      >
-        <Icon icon={codicon.gitBranch} size={small + 3} color={c.foregroundMuted} />
-        <T size={small} color={c.foregroundMuted}>
-          {scope === "all" ? "All" : "Auto"}
-        </T>
-      </Pressable>
+      <ReferencePicker key={cwd} cwd={cwd} scope={scope} onScope={onScope} autoHint={autoHint} />
       <IconButton icon={codicon.gitFetch} label="Fetch" disabled={sync.isPending} onPress={() => run("fetch", "Fetched")} />
       <IconButton icon={codicon.repoPull} label="Pull" disabled={sync.isPending} onPress={() => run("pull", "Pulled")} />
       <IconButton icon={codicon.repoPush} label="Push" disabled={sync.isPending} onPress={() => run("push", "Pushed")} />

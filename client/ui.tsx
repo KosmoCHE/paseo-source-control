@@ -28,7 +28,7 @@ export function useHost() {
   if (!host) throw new Error("useHost needs a HostProvider above it");
   const { compact, platform } = host.layout;
   const code = useMemo(() => codeFont(platform), [platform]);
-  return { c: host.theme.colors, compact, platform, mono: MONO[platform], code, text: compact ? 15 : 13, small: compact ? 12 : 11, row: compact ? 34 : 24 };
+  return { host, c: host.theme.colors, compact, platform, mono: MONO[platform], code, text: compact ? 15 : 13, small: compact ? 12 : 11, row: compact ? 34 : 24 };
 }
 
 /**
@@ -350,6 +350,23 @@ export function IconButton({ icon, label, hint, onPress, disabled, toggled }: { 
       style={({ pressed }) => ({ padding: compact ? 6 : 3, borderRadius: 4, opacity: disabled ? 0.4 : pressed ? 0.6 : 1, backgroundColor: toggled ? c.surface2 : undefined })}
     >
       <Icon icon={icon} size={compact ? 18 : 16} color={c.foregroundMuted} />
+    </Pressable>
+  );
+}
+
+/** A labelled choice in a dialog. */
+export function Choice({ label, onPress, danger }: { label: string; onPress: () => void; danger?: boolean }) {
+  const { c } = useHost();
+  return (
+    <Pressable
+      {...useHint(label)}
+      accessibilityRole="button"
+      onPress={onPress}
+      style={{ paddingVertical: 6, paddingHorizontal: 14, borderRadius: 4, borderWidth: 1, borderColor: danger ? c.statusDanger : c.border }}
+    >
+      <T weight="600" color={danger ? c.statusDanger : c.foreground}>
+        {label}
+      </T>
     </Pressable>
   );
 }

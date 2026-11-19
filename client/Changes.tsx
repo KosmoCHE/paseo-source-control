@@ -5,7 +5,7 @@ import { useRpc } from "@getpaseo/plugin/client";
 import { Modal } from "@getpaseo/plugin/client/ui";
 import { useState } from "react";
 import type { ReactNode } from "react";
-import { Pressable, View } from "react-native";
+import { View } from "react-native";
 import { discardRpc, markersRpc, removeRpc, stageRpc, unstageRpc } from "../shared/git";
 import type { DiffSource, FileChange, Status } from "../shared/git";
 import * as codicon from "./codicons";
@@ -18,7 +18,7 @@ import { useOpenFile } from "./openFile";
 import type { Row } from "./sticky";
 import { StickyList } from "./StickyList";
 import { fileName } from "./tree";
-import { Heading, IconButton, T, toggle, useHost } from "./ui";
+import { Choice, Heading, IconButton, T, toggle } from "./ui";
 
 /** One of VS Code's modal dialogs: a choice is answered with its label, Cancel or closing with null. */
 interface Question {
@@ -210,16 +210,5 @@ export function Changes({ cwd, workspaceId, status, folded, onFold }: Props) {
         </Modal.Content>
       </Modal>
     </>
-  );
-}
-
-function Choice({ label, onPress, danger }: { label: string; onPress: () => void; danger?: boolean }) {
-  const { c } = useHost();
-  return (
-    <Pressable accessibilityRole="button" onPress={onPress} style={{ paddingVertical: 6, paddingHorizontal: 14, borderRadius: 4, borderWidth: 1, borderColor: danger ? c.statusDanger : c.border }}>
-      <T weight="600" color={danger ? c.statusDanger : c.foreground}>
-        {label}
-      </T>
-    </Pressable>
   );
 }
